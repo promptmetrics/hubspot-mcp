@@ -1,0 +1,115 @@
+# hubspot-mcp
+
+A standalone [Model Context Protocol](https://modelcontextprotocol.io) server
+for HubSpot CRM, distributable as a **Claude Code plugin**.
+
+Exposes **76 domain tools** (contacts, companies, deals, tickets, pipelines,
+owners, search, docs, etc.) plus a **5-tool write-safety layer**: every write
+produces a preview you approve or reject, with undo snapshots and an audit log.
+No write touches HubSpot until it is approved.
+
+Auth is **bring-your-own-app OAuth** (default) — you supply your own HubSpot
+private app's client credentials; tokens refresh automatically. A private-app
+token (PAT) fallback is available via the CLI.
+
+## Install as a Claude Code plugin
+
+### 1. Create a HubSpot private app
+
+1. Go to the [HubSpot developer portal](https://developers.hubspot.com) and
+   create (or open) a private app.
+2. In the app's **Auth** tab, copy the **Client ID** and **Client Secret**.
+3. Add this **redirect URI**:
+   ```
+   http://localhost:3000/oauth/callback
+   ```
+4. Note your **portal (hub) ID** (shown in HubSpot under the gear icon →
+   "Hub ID", or in the app URL).
+
+### 2. Add the marketplace and install the plugin
+
+In Claude Code:
+
+```
+/plugin marketplace add promptmetrics/hubspot-mcp
+/plugin install hubspot-mcp@promptmetrics-hubspot-mcp
+```
+
+You'll be prompted for four values:
+
+| Field | What to enter |
+| --- | --- |
+| `hubspot_client_id` | your app's Client ID |
+| `hubspot_client_secret` | your app's Client Secret (stored in your OS keychain) |
+| `hubspot_portal_id` | your portal (hub) ID |
+| `hubspot_region` | `us` (default) or `eu` if your app was created in the EU portal |
+
+### 3. Authenticate
+
+The plugin's SessionStart hook writes your app credentials to
+`~/.claude/hubspot/app_credentials.json` (chmod 600) on every session start.
+To sign in to your portal, run:
+
+```
+/hubspot-mcp:auth
+```
+
+This opens a browser to HubSpot; approve the scopes. After it prints
+`OAuth login succeeded`, the 81 HubSpot tools are live.
+
+> **First run:** the MCP server provisions an isolated Python venv on first
+> launch (this takes ~20–30s while it installs `fastmcp`, `httpx`, `pydantic`).
+> If the tools don't appear right away, restart the session. Requires
+> **Python 3.12+** on your `PATH`.
+
+## Tools
+
+- **76 domain tools**: CRUD + search across contacts, companies, deals,
+  tickets, tasks, owners, pipelines, stages, properties, lists, engagements,
+  docs search, and more.
+- **5 safety tools**: `hubspot_approve_write`, `hubspot_reject_write`,
+  `hubspot_list_pending_writes`, `hubspot_list_recent_audit`,
+  `hubspot_undo_write`.
+
+Every mutating call goes through a **preview → approve** gate. Approved writes
+record an undo snapshot and an audit-log entry under
+`~/.claude/hubspot/<portal>/`.
+
+## CLI (standalone, outside the plugin)
+
+The package also installs a `hubspot-mcp` console script:
+
+```sh
+hubspot-mcp run --transport stdio          # run the MCP server
+hubspot-mcp auth login --portal <id>       # OAuth flow
+hubspot-mcp auth login --portal <id> --mode token   # PAT fallback
+hubspot-mcp auth status --portal <id>      # show auth state
+```
+
+## Layout
+
+```
+plugin.json                       plugin manifest (userConfig, mcpServers, hook ref)
+.claude-plugin/marketplace.json   marketplace catalog (source: "./")
+bin/run-mcp.sh                    venv-provisioning MCP launcher
+bin/session-start.sh              SessionStart hook: writes app_credentials.json
+hooks/hooks.json                  SessionStart hook wiring
+skills/auth/SKILL.md              /hubspot-mcp:auth slash command
+src/hubspot_mcp/                  the MCP server (76 domain + 5 safety tools)
+```
+
+## Troubleshooting
+
+- **`/hubspot-mcp:auth` says command not found** — the venv didn't provision.
+  Ensure `python3 --version` is 3.12+, then `/plugin` → reinstall
+  `hubspot-mcp`.
+- **MCP server fails to start** — check `python3 >= 3.12` and network access
+  for the first `pip install`.
+- **OAuth redirect mismatch** — confirm `http://localhost:3000/oauth/callback`
+  is registered in your app's Auth tab.
+- **EU portal errors ("Hub is unknown to this Hublet")** — set
+  `hubspot_region` to `eu`.
+
+## License
+
+MIT.

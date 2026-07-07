@@ -1,14 +1,41 @@
 {
   "name": "hubspot-mcp",
-  "version": "0.1.0",
-  "description": "Standalone MCP server for HubSpot CRM — 76 domain tools, write-safety preview/approve gate, undo snapshots, audit log. Bring-your-own-app OAuth (default) or private-app token.",
+  "version": "0.1.1",
+  "description": "HubSpot CRM MCP server — 76 domain tools + write-safety preview/approve gate, undo snapshots, audit log. Bring-your-own-app OAuth.",
   "author": { "name": "Izzy Aly" },
   "license": "MIT",
   "keywords": ["hubspot", "crm", "mcp", "model-context-protocol", "claude"],
+  "userConfig": {
+    "hubspot_client_id": {
+      "type": "string",
+      "description": "HubSpot app Client ID (find it in your app's Auth tab in the HubSpot developer portal).",
+      "required": true
+    },
+    "hubspot_client_secret": {
+      "type": "string",
+      "description": "HubSpot app Client Secret (same Auth tab). Stored in your OS keychain and written to ~/.claude/hubspot/app_credentials.json (chmod 600); only ever sent to HubSpot's token endpoint.",
+      "required": true,
+      "sensitive": true
+    },
+    "hubspot_portal_id": {
+      "type": "string",
+      "description": "The HubSpot portal (hub) ID the server should operate on.",
+      "required": true
+    },
+    "hubspot_region": {
+      "type": "string",
+      "description": "App region: 'us' (default) or 'eu'. Use 'eu' only if your app was created in the EU developer portal.",
+      "required": false
+    }
+  },
   "mcpServers": {
     "hubspot": {
-      "command": "python3",
-      "args": ["-m", "hubspot_mcp", "run", "--transport", "stdio"]
+      "command": "sh",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/run-mcp.sh"],
+      "env": {
+        "HUBSPOT_PORTAL": "${user_config.hubspot_portal_id}"
+      }
     }
-  }
+  },
+  "hooks": "./hooks/hooks.json"
 }

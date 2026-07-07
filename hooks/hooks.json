@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "HUBSPOT_CLIENT_ID=\"${user_config.hubspot_client_id}\" HUBSPOT_CLIENT_SECRET=\"${user_config.hubspot_client_secret}\" HUBSPOT_REGION=\"${user_config.hubspot_region}\" HUBSPOT_PORTAL=\"${user_config.hubspot_portal_id}\" sh \"${CLAUDE_PLUGIN_ROOT}/bin/session-start.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

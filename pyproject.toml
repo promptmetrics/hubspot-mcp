@@ -1,6 +1,6 @@
 [project]
 name = "hubspot-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "Standalone MCP server for HubSpot CRM — tools + write-safety state machine"
 requires-python = ">=3.12"
 license = "MIT"
@@ -13,8 +13,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/iiizzzyyy/hubspot-claude"
-Repository = "https://github.com/iiizzzyyy/hubspot-claude"
+Homepage = "https://github.com/promptmetrics/hubspot-mcp"
+Repository = "https://github.com/promptmetrics/hubspot-mcp"
 
 [project.scripts]
 hubspot-mcp = "hubspot_mcp.__main__:main"

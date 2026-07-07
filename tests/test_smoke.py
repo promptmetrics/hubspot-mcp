@@ -22,7 +22,7 @@ from hubspot_mcp.tools import list_tools
 def test_package_imports():
     import hubspot_mcp  # noqa: F401
 
-    assert hubspot_mcp.__version__ == "0.1.0"
+    assert hubspot_mcp.__version__ == "0.1.1"
 
 
 def test_registry_has_76_tools():
