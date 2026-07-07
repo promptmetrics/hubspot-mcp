@@ -1,0 +1,41 @@
+[project]
+name = "hubspot-mcp"
+version = "0.1.0"
+description = "Standalone MCP server for HubSpot CRM — tools + write-safety state machine"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "Izzy Aly" }]
+keywords = ["hubspot", "crm", "mcp", "claude", "automation"]
+dependencies = [
+    "httpx>=0.27,<0.28",
+    "pydantic>=2.0,<3",
+    "fastmcp>=2.0,<3",
+]
+
+[project.urls]
+Homepage = "https://github.com/iiizzzyyy/hubspot-claude"
+Repository = "https://github.com/iiizzzyyy/hubspot-claude"
+
+[project.scripts]
+hubspot-mcp = "hubspot_mcp.__main__:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<9",
+    "pytest-asyncio>=0.23,<0.24",
+    "pytest-httpx>=0.30,<0.31",
+    "respx>=0.21,<0.22",
+    "hypothesis>=6.0,<7",
+    "pyyaml>=6.0,<7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hubspot_mcp"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

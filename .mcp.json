@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "hubspot": {
+      "command": "python3",
+      "args": ["-m", "hubspot_mcp", "run", "--transport", "stdio"],
+      "env": {
+        "HUBSPOT_MODE": "oauth"
+      }
+    }
+  }
+}

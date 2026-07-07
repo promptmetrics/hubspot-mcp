@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# HubSpot credentials — NEVER commit
+.hubspot-portal
+*.token
+app_credentials.json
+oauth_states/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Test / cache
+.pytest_cache/
+
+# Local Claude Code settings (personal, not shared)
+.claude/settings.local.json
+
+# Reference copy of the source plugin (read-only build reference, not part of this server)
+reference/

@@ -1,0 +1,14 @@
+{
+  "name": "hubspot-mcp",
+  "version": "0.1.0",
+  "description": "Standalone MCP server for HubSpot CRM — 76 domain tools, write-safety preview/approve gate, undo snapshots, audit log. Bring-your-own-app OAuth (default) or private-app token.",
+  "author": { "name": "Izzy Aly" },
+  "license": "MIT",
+  "keywords": ["hubspot", "crm", "mcp", "model-context-protocol", "claude"],
+  "mcpServers": {
+    "hubspot": {
+      "command": "python3",
+      "args": ["-m", "hubspot_mcp", "run", "--transport", "stdio"]
+    }
+  }
+}
