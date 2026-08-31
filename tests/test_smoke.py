@@ -63,7 +63,10 @@ async def test_ctx_excluded_from_tool_schemas():
     # a domain tool: ctx must not appear in its JSON-schema properties
     props = tools["hubspot_get_object"].input_schema.get("properties", {})
     assert "ctx" not in props
-    assert set(props) == {"object_id", "object_type"}
+    # ``properties`` scopes the fetch to named fields — required so preview
+    # snapshots capture only the properties a write touches, rather than the
+    # whole record (which drags read-only fields into undo replay).
+    assert set(props) == {"object_id", "object_type", "properties"}
     # a safety tool: same
     assert "ctx" not in tools["hubspot_approve_write"].input_schema.get("properties", {})
     # the Callable-injection param must be dropped from hubspot_docs_search

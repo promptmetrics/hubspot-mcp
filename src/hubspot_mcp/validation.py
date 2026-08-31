@@ -116,6 +116,62 @@ def validate_properties(
     }
 
 
+
+# Read-only system fields present on every object type.  Fallback for schemas
+# cached without ``modificationMetadata`` (custom objects — see
+# ``discover_custom_schemas``).  Deliberately NOT a blanket ``hs_*`` strip:
+# fields like ``hs_lead_status`` are writable.
+_READ_ONLY_SYSTEM_PROPERTIES = frozenset({
+    "hs_object_id",
+    "createdate",
+    "lastmodifieddate",
+    "hs_createdate",
+    "hs_lastmodifieddate",
+    "hs_created_by_user_id",
+    "hs_updated_by_user_id",
+})
+
+
+def filter_writable_properties(
+    object_type: str,
+    properties: dict[str, Any],
+    portal_id: str,
+    base_dir: Any = None,
+) -> tuple[dict[str, Any], list[str]]:
+    """Split *properties* into (writable, stripped-read-only-names).
+
+    HubSpot rejects a PATCH that sets a read-only property, so replaying a
+    snapshot verbatim (which includes ``hs_lastmodifieddate`` etc.) fails the
+    whole update.  Prefers ``modificationMetadata.readOnlyValue`` from the
+    cached raw ``/crm/v3/properties/{domain}`` response (standard objects);
+    falls back to :data:`_READ_ONLY_SYSTEM_PROPERTIES` for properties whose
+    cached schema entry carries no metadata (custom objects, cold cache).
+    """
+    cache = SchemaCache(portal_id, base_dir=base_dir)
+    schema_data = cache.get(object_type)
+    metadata_by_name: dict[str, dict[str, Any]] = {}
+    if schema_data is not None:
+        for entry in schema_data.get("results", []) or []:
+            if isinstance(entry, dict) and entry.get("name"):
+                meta = entry.get("modificationMetadata")
+                if isinstance(meta, dict):
+                    metadata_by_name[str(entry["name"])] = meta
+
+    writable: dict[str, Any] = {}
+    stripped: list[str] = []
+    for name, value in properties.items():
+        meta = metadata_by_name.get(name)
+        if meta is not None:
+            read_only = bool(meta.get("readOnlyValue"))
+        else:
+            read_only = name in _READ_ONLY_SYSTEM_PROPERTIES
+        if read_only:
+            stripped.append(name)
+        else:
+            writable[name] = value
+    return writable, stripped
+
+
 def validate_scopes(
     agent_names: list[str],
     portal_scopes: list[str],

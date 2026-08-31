@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 
@@ -27,6 +28,22 @@ def list_blueprints() -> list[WorkflowBlueprint]:
 
 def get_blueprint(name: str) -> WorkflowBlueprint | None:
     return _BLUEPRINT_REGISTRY.get(name)
+
+
+def reload_blueprints(base_dir: Path | None = None) -> int:
+    """Rebuild the blueprint registry from disk; returns the registry size.
+
+    Upstream loads packaged JSON blueprints plus user-promoted ones, so a fresh
+    process must reload to see a blueprint promoted by an earlier one
+    (hubspot-claude ``a51d8ee``). This port still carries blueprints as Python
+    modules that self-register at import, and there is no promote path yet — the
+    JSON loader and ``blueprint_library`` tools land with the blueprint phase.
+    Until then the packaged set is already complete at import and there is
+    nothing on disk to pick up, so this is a truthful no-op rather than a
+    reload. The call site in ``tools/workflows.py`` is kept identical to
+    upstream so that phase is a drop-in replacement.
+    """
+    return len(_BLUEPRINT_REGISTRY)
 
 
 def build_blueprint_context() -> str:

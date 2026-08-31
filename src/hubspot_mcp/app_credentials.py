@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from hubspot_mcp.fileio import write_private_json
+
 
 def _credentials_file() -> Path:
     return Path.home() / ".claude" / "hubspot" / "app_credentials.json"
@@ -42,8 +44,7 @@ def save_app_credentials(
     if app_id is not None:
         payload["app_id"] = app_id
     path = _credentials_file()
-    path.write_text(json.dumps(payload, indent=2))
-    path.chmod(0o600)
+    write_private_json(path, payload)
 
 
 def get_client_id() -> str | None:

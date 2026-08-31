@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import secrets
 import time
 import urllib.parse
@@ -18,6 +19,8 @@ from hubspot_mcp.app_credentials import (
     get_token_fallback_url,
 )
 from hubspot_mcp.config import CONFIG_DIR, PortalConfig, load_portal_config, save_portal_config
+
+from hubspot_mcp.fileio import write_private_json
 
 _REFRESH_BUFFER_SECONDS = 300  # refresh if within 5 minutes of expiry
 _STATE_EXPIRY_SECONDS = 600  # 10 minutes
@@ -38,7 +41,20 @@ def _oauth_state_dir() -> Path:
     return path
 
 
+# The OAuth ``state`` is attacker-influenceable: it arrives back verbatim from
+# the callback URL, so it must be validated before it touches a filesystem
+# path. "../<portal_id>" would resolve to the portal token file, which
+# _clear_oauth_state unlinks — a forced-re-auth DoS.
+_STATE_RE = re.compile(r"[A-Za-z0-9_-]{1,128}")
+
+
+def _valid_state(state: str) -> bool:
+    return bool(state and _STATE_RE.fullmatch(state))
+
+
 def _oauth_state_file(state: str) -> Path:
+    if not _valid_state(state):
+        raise ValueError("Invalid OAuth state.")
     return _oauth_state_dir() / f"{state}.json"
 
 
@@ -55,11 +71,12 @@ def _save_oauth_state(
         "redirect_uri": redirect_uri,
         "expires_at": time.time() + _STATE_EXPIRY_SECONDS,
     }
-    path.write_text(json.dumps(payload))
-    path.chmod(0o600)
+    write_private_json(path, payload)
 
 
 def _load_oauth_state(state: str) -> dict[str, Any] | None:
+    if not _valid_state(state):
+        return None
     path = _oauth_state_file(state)
     if not path.exists():
         return None
@@ -74,6 +91,8 @@ def _load_oauth_state(state: str) -> dict[str, Any] | None:
 
 
 def _clear_oauth_state(state: str) -> None:
+    if not _valid_state(state):
+        return
     try:
         _oauth_state_file(state).unlink(missing_ok=True)
     except OSError:

@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from hubspot_mcp.fileio import write_private_json
+
 
 @dataclass
 class PortalConfig:
@@ -105,8 +107,7 @@ def save_portal_config(portal: PortalConfig) -> None:
         data["refresh_token"] = portal.refresh_token
     if portal.expires_at:
         data["expires_at"] = portal.expires_at
-    json_file.write_text(json.dumps(data, indent=2))
-    json_file.chmod(0o600)
+    write_private_json(json_file, data)
 
     # Remove old .token file if present to avoid ambiguity
     token_file = _portal_token_file(portal.portal_id)
