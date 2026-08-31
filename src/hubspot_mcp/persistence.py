@@ -3,16 +3,28 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from hubspot_mcp.config import CONFIG_DIR
+from hubspot_mcp.config import CONFIG_DIR, _validate_portal_id
+
+# Charset validation, not the uuid4[:8] mint format: action_ids only need to
+# be path-safe (no separators, no dot segments), and looser ids appear in
+# fixtures.  User-supplied ids (approve/reject) that fail this are treated as
+# not-found; store() raises because its ids are always self-minted.
+_ACTION_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def _valid_action_id(action_id: str) -> bool:
+    return bool(action_id and _ACTION_ID_RE.fullmatch(action_id))
 
 
 def _pending_previews_dir(portal_id: str) -> Path:
+    _validate_portal_id(portal_id)
     return CONFIG_DIR / portal_id / "pending_previews"
 
 
@@ -51,6 +63,8 @@ def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
 
 def store(portal_id: str, action_id: str, data: dict[str, Any]) -> None:
     """Persist a pending preview to disk with a server-side timestamp."""
+    if not _valid_action_id(action_id):
+        raise ValueError(f"Invalid action_id: {action_id!r}")
     pending_dir = _pending_previews_dir(portal_id)
     file_path = pending_dir / f"{action_id}.json"
     data["_stored_at"] = datetime.now(timezone.utc).isoformat()
@@ -60,6 +74,8 @@ def store(portal_id: str, action_id: str, data: dict[str, Any]) -> None:
 
 def load(portal_id: str, action_id: str) -> dict[str, Any] | None:
     """Load a pending preview from disk by action_id."""
+    if not _valid_action_id(action_id):
+        return None
     file_path = _pending_previews_dir(portal_id) / f"{action_id}.json"
     if not file_path.exists():
         return None
@@ -68,6 +84,8 @@ def load(portal_id: str, action_id: str) -> dict[str, Any] | None:
 
 def clear(portal_id: str, action_id: str) -> None:
     """Remove a pending preview from disk."""
+    if not _valid_action_id(action_id):
+        return
     pending_dir = _pending_previews_dir(portal_id)
     if not pending_dir.exists():
         return
@@ -120,6 +138,8 @@ def confirm(portal_id: str, action_id: str, count: int) -> bool:
     Returns True if the provided count matches the preview's required
     confirmation value and the confirmation is persisted.
     """
+    if not _valid_action_id(action_id):
+        return False
     pending_dir = _pending_previews_dir(portal_id)
     file_path = pending_dir / f"{action_id}.json"
     if not file_path.exists():
