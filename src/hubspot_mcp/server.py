@@ -90,6 +90,8 @@ async def app_lifespan(server: MCPServer):
     cache: SchemaCache | None = None
     portal_config: PortalConfig | None = None
     auth_error: str | None = None
+    capabilities = None
+    capabilities_conclusive = False
 
     if portal_id is None:
         auth_error = (
@@ -101,18 +103,22 @@ async def app_lifespan(server: MCPServer):
             portal_config = await provider.resolve(portal_id)
             cache = await warm_standard_schemas(portal_config)
             client = HubSpotClient(portal_config)
+            capabilities, capabilities_conclusive = await _probe_capabilities(portal_config)
         except NotAuthenticatedError as exc:
             auth_error = str(exc)
         except Exception as exc:  # noqa: BLE001 — surface any init failure as guidance
             auth_error = f"Failed to initialize HubSpot client for portal {portal_id}: {exc}"
 
     try:
+        if capabilities is not None and capabilities_conclusive:
+            _unadvertise_unavailable_tools(capabilities)
         yield {
             "client": client,
             "cache": cache,
             "portal_config": portal_config,
             "portal_id": portal_id,
             "auth_error": auth_error,
+            "capabilities": capabilities,
         }
     finally:
         if client is not None:
@@ -135,6 +141,42 @@ mcp = MCPServer(
         "server/discover": CacheHint(ttl_ms=300_000, scope="private"),
     },
 )
+
+
+
+async def _probe_capabilities(portal_config: PortalConfig):
+    """Probe portal entitlements; never fail startup over it."""
+    from hubspot_mcp.capabilities import probe_portal, probe_was_conclusive
+
+    try:
+        matrix = await probe_portal(portal_config)
+    except Exception:  # noqa: BLE001 — an unreachable portal must not stop the server
+        return None, False
+    return matrix, probe_was_conclusive(portal_config.portal_id)
+
+
+def _unadvertise_unavailable_tools(matrix) -> None:
+    """Drop tools this portal is not entitled to from ``tools/list``.
+
+    Only ever called with a CONCLUSIVE probe. On a transient probe failure the
+    matrix sits at its defaults -- workflows/users/marketing/cms/custom_objects
+    are all False -- so filtering on it would silently unadvertise a dozen tools
+    after one network blip, and the model would simply report it cannot manage
+    workflows. An inconclusive probe advertises everything and lets the
+    call-time check explain any refusal instead.
+
+    Safe to mutate the module-level server: one process serves one portal
+    (``_resolve_portal_id``). It is also why ``tools/list`` must be
+    ``cacheScope: "private"`` -- the listing is portal-specific.
+    """
+    from hubspot_mcp.capabilities import missing_capabilities_for_tool, tool_capability_requirements
+
+    for tool_name in tool_capability_requirements():
+        if missing_capabilities_for_tool(tool_name, matrix):
+            try:
+                mcp.remove_tool(tool_name)
+            except Exception:  # noqa: BLE001 — never registered, or already gone
+                pass
 
 
 def _lifespan(ctx: Context) -> dict[str, Any]:
@@ -322,6 +364,23 @@ def _make_domain_wrapper(tool_def: ToolDef):
         if lf.get("auth_error"):
             raise ToolError(lf["auth_error"])
 
+        # Call-time entitlement check. Belt and braces: an inconclusive probe
+        # leaves the tool advertised, so this is where the operator finds out
+        # WHY it cannot run, instead of the tool silently missing.
+        matrix = lf.get("capabilities")
+        if matrix is not None:
+            from hubspot_mcp.capabilities import (
+                capability_explanation,
+                missing_capabilities_for_tool,
+            )
+
+            missing = missing_capabilities_for_tool(name, matrix)
+            if missing:
+                raise ToolError(
+                    f"{name} is unavailable on this HubSpot portal: "
+                    + "; ".join(capability_explanation(f) for f in missing)
+                )
+
         # MRTR resume: this retry carries the operator's answer plus the
         # action_id minted on the first round. Resolve the pending preview
         # instead of re-running the tool, which would mint a second one.
@@ -473,6 +532,39 @@ async def hubspot_undo_write(ctx: Context, action_id: str) -> Any:
     return {"undo": action_id, "result": message}
 
 
+async def hubspot_status(ctx: Context, window_hours: int = 24) -> Any:
+    """Portal status: entitlements plus request/error/cost aggregates from the trace log."""
+    lf = await _safety_ctx(ctx)
+    from hubspot_mcp.trace import compute_status_aggregates
+
+    matrix = lf.get("capabilities")
+    entitlements: dict[str, Any] = {}
+    if matrix is not None:
+        entitlements = {
+            "tier": matrix.tier,
+            "unavailable_tools": sorted(
+                t for t in _capability_gated_tools() if _tool_blocked(t, matrix)
+            ),
+        }
+    return {
+        "portal_id": lf["portal_id"],
+        "entitlements": entitlements,
+        "activity": compute_status_aggregates(lf["portal_id"], window_hours=window_hours),
+    }
+
+
+def _capability_gated_tools() -> list[str]:
+    from hubspot_mcp.capabilities import tool_capability_requirements
+
+    return list(tool_capability_requirements())
+
+
+def _tool_blocked(tool_name: str, matrix) -> bool:
+    from hubspot_mcp.capabilities import missing_capabilities_for_tool
+
+    return bool(missing_capabilities_for_tool(tool_name, matrix))
+
+
 def _safety_tool_registrations() -> list[tuple[str, Any, str]]:
     return [
         (fn.__name__, fn, (fn.__doc__ or "").strip().split("\n")[0])
@@ -482,6 +574,7 @@ def _safety_tool_registrations() -> list[tuple[str, Any, str]]:
             hubspot_list_pending_writes,
             hubspot_list_recent_audit,
             hubspot_undo_write,
+            hubspot_status,
         )
     ]
 
