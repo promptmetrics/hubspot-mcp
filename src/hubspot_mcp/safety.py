@@ -15,19 +15,8 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from hubspot_mcp.models import BatchApprovalMode
+from hubspot_mcp.research import classify_url
 from hubspot_mcp.validation import format_scope_error, validate_scopes
-
-
-def classify_url(url: str) -> tuple[str, str]:
-    """Local stub for the not-ported ``research.classify_url``.
-
-    The tools-only MCP server (approach C) never passes ``informing_sources``
-    from a sub-agent — ``_build_tool_preview`` always sets it to ``[]`` — so
-    :func:`normalize_informing_sources` returns before this is called. The stub
-    keeps the module import-clean and returns a safe default if a non-empty
-    source list ever reaches it.
-    """
-    return ("unknown", "community-unverified")
 
 
 class ScopeBlocked(Exception):
@@ -118,6 +107,10 @@ async def apply_write(
     trace_id: str | None = None,
     batch_mode: BatchApprovalMode = BatchApprovalMode.SINGLE,
     proposed_payload: dict[str, Any] | None = None,
+    loop_step_number: int | None = None,
+    pattern: bool = False,
+    pattern_confirm_threshold: int | None = None,
+    filter_summary: str = "",
 ) -> ApplyWriteResult:
     """Run the shared write-safety path and persist a pending preview.
 
@@ -139,6 +132,11 @@ async def apply_write(
 
     action_id = str(uuid.uuid4())[:8]
     normalized_sources = normalize_informing_sources(preview.informing_sources)
+    # Prefer the preview builder's proposed_payload when it set one: the builder
+    # is the component that inspected the intent and knows what to create (e.g.
+    # a workflow blueprint reference). Falls back to the caller's argument (the
+    # tool path passes ``tool_input`` here) so direct-tool dispatch is unchanged.
+    persisted_payload = preview.proposed_payload or proposed_payload or {}
     preview_data = {
         "agent_name": agent_name,
         "tool_name": tool_name,
@@ -147,15 +145,76 @@ async def apply_write(
         "preview": preview.model_dump(mode="json"),
         "trace_id": trace_id,
         "batch_mode": batch_mode.value,
-        "proposed_payload": proposed_payload or {},
+        "proposed_payload": persisted_payload,
         "informing_sources": normalized_sources,
         "required_confirmation": preview.impact_count,
         "confirmed_count": None,
     }
-    # Persist the pending preview. The original plugin resolved this lazily via
-    # ``orchestrator._store_pending_preview`` (a re-export of ``persistence.store``);
-    # the tools-only MCP server ports ``persistence`` directly and drops the
-    # orchestrator module, so we import ``store`` straight from persistence.
+    # When a paused durable-loop step produced this write, tag the pending
+    # record with its loop step so the preview is correlatable to the loop.
+    # Purely informational — resume correlates via LoopState.pending_action_id,
+    # so execute_pending_write need not know about loops.
+    if loop_step_number is not None:
+        preview_data["loop_step_number"] = loop_step_number
+    # Classify the write into an approval tier (Bounded Autonomy, Phase 2) and
+    # persist it, so both the auto-apply decision (interactive callers) and the
+    # execute-time count gate read one deterministic value.  Loaded per-portal;
+    # a missing/malformed policy file falls back to the conservative default.
+    from hubspot_mcp.policy import classify_write, load_approval_policy
+
+    preview_data["approval_tier"] = classify_write(
+        preview_data, load_approval_policy(portal_config.portal_id)
+    )
+    # Pattern approval (divergence-safe): the caller (handle_tool) has already run
+    # the eligibility gate (reversible, non-sensitive, object-update only) and set
+    # ``pattern=True``.  Materialize the approved RULE + the matched set with each
+    # record's captured pre-image (the preview builder's original_values — one
+    # capture path), so execute-time compare-and-set has a per-record baseline.
+    # Gated on ``pattern`` so every non-pattern caller/path is byte-identical.
+    if pattern and batch_mode == BatchApprovalMode.PATTERN:
+        records = persisted_payload.get("records") or []
+        object_type = (
+            persisted_payload.get("object_type")
+            or (intent.target_object if intent is not None else None)
+        )
+        matched: list[dict[str, Any]] = []
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            rid = str(rec.get("id"))
+            changes = rec.get("properties") if isinstance(rec.get("properties"), dict) else {}
+            matched.append(
+                {
+                    "id": rid,
+                    "pre_image": preview.original_values.get(rid, {}),
+                    "changes": changes,
+                }
+            )
+        count = len(matched)
+        # The rule statement's representative changes = the first record's payload;
+        # per-record ``changes`` are what the executor actually applies.
+        rule_changes = matched[0]["changes"] if matched else {}
+        preview_data["pattern_eligible"] = True
+        preview_data["pattern"] = {
+            "rule": {
+                "tool": tool_name,
+                "object_type": object_type,
+                "changes": rule_changes,
+                "filter_summary": filter_summary,
+            },
+            "matched": matched,
+            "count": count,
+        }
+        # Over-threshold backstop (§4/§7): a matched set larger than the configured
+        # threshold requires the typed count at approve — reuse the FULL_GATE count
+        # gate.  Otherwise a single count-free approve (CONFIRM).  Pattern writes are
+        # NEVER AUTO: the one human approval is always required.
+        over_threshold = pattern_confirm_threshold is not None and count > pattern_confirm_threshold
+        preview_data["required_confirmation"] = count if over_threshold else 0
+        preview_data["approval_tier"] = "FULL_GATE" if over_threshold else "CONFIRM"
+    # The plugin resolved this lazily through ``orchestrator`` purely to keep a
+    # monkeypatch target observable; the tools-only server drops that module and
+    # binds ``persistence.store`` directly.
     from hubspot_mcp.persistence import store as _store_pending_preview
 
     # Offload the blocking flock+fsync to a worker thread so concurrent daemon
