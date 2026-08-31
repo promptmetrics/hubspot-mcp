@@ -9,6 +9,17 @@ layer rather than per-portal credential files.
 
 Intentionally not implemented in Phase 1; left as a documented placeholder so
 the Phase 2 wiring has a known home.
+
+**Phase 2 must verify per request, not per connection.** Protocol revision
+2026-07-28 removes the ``initialize``/``notifications/initialized`` handshake
+and the ``Mcp-Session-Id`` header entirely (SEP-2575), so there is no
+connection-establishment phase to authenticate in and no session identity to
+carry a prior decision forward. Anything that authenticates once and then
+trusts the connection would authorise every later request on that connection
+for free. Verify the inbound token on each request instead — either as ASGI
+middleware in front of ``MCPServer.streamable_http_app()``, or via the SDK's
+``token_verifier``/``auth`` constructor parameters, which run per request by
+construction and are the preferred route.
 """
 from __future__ import annotations
 

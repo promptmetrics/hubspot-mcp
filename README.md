@@ -58,7 +58,7 @@ This opens a browser to HubSpot; approve the scopes. After it prints
 `OAuth login succeeded`, the 81 HubSpot tools are live.
 
 > **First run:** the MCP server provisions an isolated Python venv on first
-> launch (this takes ~20–30s while it installs `fastmcp`, `httpx`, `pydantic`).
+> launch (this takes ~20–30s while it installs `mcp`, `httpx`, `pydantic`).
 > If the tools don't appear right away, restart the session. Requires
 > **Python 3.12+** on your `PATH`.
 

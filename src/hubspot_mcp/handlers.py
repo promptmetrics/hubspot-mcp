@@ -9,7 +9,7 @@ handlers and the agent-execution branch (which depended on the not-ported
 orchestrator) have been removed. ``handle_tool`` (read → invoke, write →
 preview), ``handle_approve`` (execute pending), and ``handle_reject`` remain.
 
-Handlers never own the client lifecycle — the caller (the FastMCP lifespan
+Handlers never own the client lifecycle — the caller (the server lifespan
 pool, or a fresh ``build_fresh_client_cache``) does.
 """
 from __future__ import annotations

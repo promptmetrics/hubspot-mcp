@@ -1,31 +1,35 @@
-"""FastMCP server: lifespan (warm client pool) + dynamic per-tool registration.
+"""MCP server (official ``mcp`` SDK): lifespan warm-client pool + dynamic per-tool registration.
 
 Design (approach C — tools-only, no agent orchestrator):
 
 * **Lifespan** resolves the active portal via a :class:`TokenProvider`, warms a
   single ``HubSpotClient`` + ``SchemaCache``, and yields them in the lifespan
-  context. It does *not* raise on missing auth — that would fail the MCP
-  ``initialize`` handshake and prevent ``tools/list`` from ever responding.
-  Instead it yields ``client=None`` + an ``auth_error`` string; tool wrappers
-  surface that as a clean error so the server starts cold and ``tools/call``
-  fails fast with guidance until ``hubspot-mcp auth login`` is run.
+  context. It does *not* raise on missing auth. Under 2026-07-28 there is no
+  ``initialize`` handshake to fail, so ``server/discover`` and ``tools/list``
+  must answer cold; raising here would take the whole server down instead.
+  Instead it yields ``client=None`` + an ``auth_error`` string, and tool
+  wrappers raise ``ToolError`` so ``tools/call`` fails fast with guidance until
+  ``hubspot-mcp auth login`` is run.
 
 * **Registration**: one ``@mcp.tool``-equivalent wrapper per registry entry (76
   domain tools). Each wrapper carries the tool's domain parameters (minus
-  ``client``/``portal_id``) plus a leading ``ctx: Context``, so FastMCP
+  ``client``/``portal_id``) plus a leading ``ctx: Context``, so the SDK
   generates the correct per-tool JSON schema. The wrapper delegates to
   :func:`handle_tool`, which routes reads → ``invoke_tool`` and writes → the
-  safety preview gate. ``HandlerError`` is unwrapped into a plain error dict.
+  safety preview gate. ``HandlerError`` and returned error envelopes are
+  re-raised as ``ToolError`` so the protocol layer sets ``is_error``.
 
 * **Safety tools** (approve / reject / list-pending / audit / undo) are
   registered alongside the domain tools — see :func:`_register_safety_tools`.
 
-Note: this module deliberately does *not* use ``from __future__ import
-annotations``. The safety-tool functions declare ``ctx: Context`` as a real
-parameter annotation so FastMCP's ``param.annotation is Context`` check detects
-the context kwarg and injects it; with PEP 563 the annotation would be the
-string ``"Context"`` and the check would silently fail (ctx would leak into the
-JSON schema and never receive a Context at call time).
+Context injection note: the SDK finds the context parameter via
+``typing.get_type_hints(fn)`` (``utilities/context_injection.find_context_parameter``),
+which reads ``fn.__annotations__``, while the JSON schema is derived from
+``inspect.signature(fn, eval_str=True)``, which honours ``__signature__``.
+:func:`_make_domain_wrapper` synthesises both, so it must set ``__annotations__``
+as well as ``__signature__`` — setting only the latter leaves ``ctx`` unresolved,
+which both leaks it into every tool's input schema and stops it ever being
+injected. ``tests/test_smoke.py`` pins this.
 """
 import inspect
 import os
@@ -33,8 +37,11 @@ import typing
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastmcp import Context, FastMCP
+from mcp.server.caching import CacheHint
+from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
+from hubspot_mcp import __version__
 from hubspot_mcp.auth import EnvTokenProvider, OAuthProvider
 from hubspot_mcp.auth.base import NotAuthenticatedError, TokenProvider
 from hubspot_mcp.cache import SchemaCache, warm_standard_schemas
@@ -50,7 +57,7 @@ from hubspot_mcp.tools import ToolDef, list_tools
 
 # Module-level config populated by ``configure_server`` before ``mcp.run()``.
 # Kept here (not a closure) so ``__main__`` can set it and the lifespan can read
-# it without threading state through FastMCP's constructor.
+# it without threading state through the server constructor.
 _SERVER_CONFIG: dict[str, Any] = {"portal_id": None, "mode": "oauth"}
 
 
@@ -74,7 +81,7 @@ def _make_provider(mode: str) -> TokenProvider:
 
 
 @asynccontextmanager
-async def app_lifespan(server: FastMCP):
+async def app_lifespan(server: MCPServer):
     portal_id = _resolve_portal_id()
     provider = _make_provider(_SERVER_CONFIG["mode"])
 
@@ -114,20 +121,42 @@ async def app_lifespan(server: FastMCP):
                 pass
 
 
-mcp = FastMCP("hubspot-mcp", lifespan=app_lifespan)
+# SEP-2549 cache hints. ``scope="private"`` is deliberate and load-bearing:
+# the advertised tool list becomes portal-dependent once capability gating
+# lands, and a shared intermediary must never serve one portal's list to
+# another. ``ttl_ms`` is a freshness hint only — ``listChanged`` still applies.
+mcp = MCPServer(
+    "hubspot-mcp",
+    version=__version__,
+    lifespan=app_lifespan,
+    cache_hints={
+        "tools/list": CacheHint(ttl_ms=300_000, scope="private"),
+        "server/discover": CacheHint(ttl_ms=300_000, scope="private"),
+    },
+)
 
 
 def _lifespan(ctx: Context) -> dict[str, Any]:
-    """Return the lifespan-context dict, compatible across FastMCP versions.
+    """Return the lifespan-context dict."""
+    return ctx.request_context.lifespan_context
 
-    FastMCP 2.1.x exposes it as ``ctx.request_context.lifespan_context``; newer
-    FastMCP exposes ``ctx.lifespan_context`` directly. Support both so the
-    server isn't pinned to a single minor.
+
+def _raise_if_error(data: Any) -> Any:
+    """Surface a tool's error envelope as a real MCP error.
+
+    Tool functions catch ``(HubSpotError, RateLimitError, ScopeError)`` and
+    return ``{"error": ..., "tool": ...}`` rather than raising — an internal
+    contract the handler layer depends on (discarding it once caused a silent
+    "restored 0 records" undo bug upstream). But returned as-is it reaches the
+    client as an ordinary successful result, so a failed call looks like a
+    success. Raising ``ToolError`` here makes the protocol layer set
+    ``is_error=True`` while leaving the internal envelope untouched.
     """
-    rc = getattr(ctx, "request_context", None)
-    if rc is not None and hasattr(rc, "lifespan_context"):
-        return rc.lifespan_context
-    return getattr(ctx, "lifespan_context", {})
+    if isinstance(data, dict):
+        inner = data.get("result")
+        if isinstance(inner, dict) and inner.get("error"):
+            raise ToolError(str(inner["error"]))
+    return data
 
 
 def _is_callable_annotation(ann: Any) -> bool:
@@ -163,7 +192,7 @@ def _domain_params(func: Any) -> list[inspect.Parameter]:
 
     Annotations are resolved to real types via :func:`typing.get_type_hints`
     (which evals string forward-refs against the tool func's own ``__globals__``)
-    so FastMCP doesn't try to eval them against the *wrapper's* globals
+    so the SDK doesn't try to eval them against the *wrapper's* globals
     (server.py) — that would fail for any type imported in the tool's module.
     """
     sig = inspect.signature(func)
@@ -196,26 +225,32 @@ def _make_domain_wrapper(tool_def: ToolDef):
     async def wrapper(ctx: Context, **kwargs: Any) -> Any:
         lf = _lifespan(ctx)
         if lf.get("auth_error"):
-            return {"error": True, "kind": "auth", "message": lf["auth_error"], "retryable": False}
+            raise ToolError(lf["auth_error"])
         try:
             result = await handle_tool(
                 lf["client"], lf["cache"], lf["portal_config"], {"tool_name": name, "input": kwargs}
             )
         except HandlerError as exc:
-            return {"error": True, **exc.error}
-        return result["data"]
+            raise ToolError(exc.error["message"]) from exc
+        return _raise_if_error(result["data"])
 
     wrapper.__name__ = name
     wrapper.__qualname__ = name
     wrapper.__doc__ = tool_def.description
     wrapper.__signature__ = inspect.Signature(new_params)  # type: ignore[attr-defined]
+    # The SDK resolves the context parameter from ``__annotations__`` (via
+    # ``typing.get_type_hints``) but builds the schema from ``__signature__``.
+    # Both must agree or ``ctx`` leaks into the schema and is never injected.
+    wrapper.__annotations__ = {
+        p.name: p.annotation for p in new_params if p.annotation is not inspect.Parameter.empty
+    }
     return wrapper
 
 
-def _register_domain_tools() -> None:
-    for tool_def in list_tools():
-        wrapper = _make_domain_wrapper(tool_def)
-        mcp.add_tool(wrapper, name=tool_def.name, description=tool_def.description)
+def _domain_tool_registrations() -> list[tuple[str, Any, str]]:
+    return [
+        (td.name, _make_domain_wrapper(td), td.description) for td in list_tools()
+    ]
 
 
 # --- Safety stateful tools (approve / reject / pending / audit / undo) --------
@@ -223,44 +258,38 @@ def _register_domain_tools() -> None:
 async def _safety_ctx(ctx: Context) -> dict[str, Any]:
     lf = _lifespan(ctx)
     if lf.get("auth_error"):
-        return {"error": True, "kind": "auth", "message": lf["auth_error"], "retryable": False}
+        raise ToolError(lf["auth_error"])
     return lf
 
 
 async def hubspot_approve_write(ctx: Context, action_id: str, confirm_count: int | None = None) -> Any:
     """Approve and execute a pending write preview (destructive actions require confirm_count == impact)."""
     lf = await _safety_ctx(ctx)
-    if "error" in lf:
-        return lf
     try:
         result = await handle_approve(
             lf["client"], lf["cache"], lf["portal_config"],
             {"action_id": action_id, "confirm_count": confirm_count},
         )
     except HandlerError as exc:
-        return {"error": True, **exc.error}
+        raise ToolError(exc.error["message"]) from exc
     return result["data"]
 
 
 async def hubspot_reject_write(ctx: Context, action_id: str) -> Any:
     """Reject and discard a pending write preview."""
     lf = await _safety_ctx(ctx)
-    if "error" in lf:
-        return lf
     try:
         result = await handle_reject(
             lf["client"], lf["cache"], lf["portal_config"], {"action_id": action_id}
         )
     except HandlerError as exc:
-        return {"error": True, **exc.error}
+        raise ToolError(exc.error["message"]) from exc
     return result["data"]
 
 
 async def hubspot_list_pending_writes(ctx: Context) -> Any:
     """List pending (not-yet-approved) write previews for the active portal."""
     lf = await _safety_ctx(ctx)
-    if "error" in lf:
-        return lf
     from hubspot_mcp.persistence import list_pending
 
     return {"pending": list_pending(lf["portal_id"])}
@@ -269,8 +298,6 @@ async def hubspot_list_pending_writes(ctx: Context) -> Any:
 async def hubspot_list_recent_audit(ctx: Context, limit: int = 20) -> Any:
     """List recent audit-log entries for the active portal."""
     lf = await _safety_ctx(ctx)
-    if "error" in lf:
-        return lf
     from hubspot_mcp import audit
 
     return {"audit": audit.get_recent_audits(lf["portal_id"], limit=limit)}
@@ -285,8 +312,6 @@ async def hubspot_undo_write(ctx: Context, action_id: str) -> Any:
     ``cli._undo_action`` logic (the orchestrator/CLI path was not ported).
     """
     lf = await _safety_ctx(ctx)
-    if "error" in lf:
-        return lf
     from hubspot_mcp import audit
     from hubspot_mcp.snapshot import delete_undo_snapshot, load_undo_snapshot, snapshot_dir_for_portal
     from hubspot_mcp.tools import invoke_tool
@@ -295,7 +320,7 @@ async def hubspot_undo_write(ctx: Context, action_id: str) -> Any:
     snap_dir = snapshot_dir_for_portal(portal_id)
     snapshot = load_undo_snapshot(snap_dir, action_id)
     if snapshot is None:
-        return {"error": True, "kind": "not_found", "message": f"No undo snapshot for action {action_id}.", "retryable": False}
+        raise ToolError(f"No undo snapshot for action {action_id}.")
 
     metadata = snapshot.get("metadata", {})
     intent_type = metadata.get("intent_type")
@@ -303,15 +328,15 @@ async def hubspot_undo_write(ctx: Context, action_id: str) -> Any:
     client = lf["client"]
 
     if intent_type == "delete":
-        return {"error": True, "kind": "validation", "message": "Deletes are not undoable through HubSpot.", "retryable": False}
+        raise ToolError("Deletes are not undoable through HubSpot.")
     if not metadata.get("undoable", False):
-        return {"error": True, "kind": "validation", "message": "This action is not marked undoable.", "retryable": False}
+        raise ToolError("This action is not marked undoable.")
 
     try:
         if intent_type == "update":
             original_values = snapshot.get("original_values", {})
             if not original_values:
-                return {"error": True, "kind": "validation", "message": "No original values recorded; cannot undo update.", "retryable": False}
+                raise ToolError("No original values recorded; cannot undo update.")
             for object_id, properties in original_values.items():
                 await invoke_tool(
                     "hubspot_update_object", portal_id,
@@ -321,7 +346,7 @@ async def hubspot_undo_write(ctx: Context, action_id: str) -> Any:
         elif intent_type == "create":
             created_ids = metadata.get("created_ids", [])
             if not created_ids:
-                return {"error": True, "kind": "validation", "message": "No created IDs recorded; cannot undo create.", "retryable": False}
+                raise ToolError("No created IDs recorded; cannot undo create.")
             for object_id in created_ids:
                 await invoke_tool(
                     "hubspot_delete_object", portal_id,
@@ -329,9 +354,9 @@ async def hubspot_undo_write(ctx: Context, action_id: str) -> Any:
                 )
             outcome = f"Deleted {len(created_ids)} created {object_type or 'record(s)'} to undo the create."
         else:
-            return {"error": True, "kind": "validation", "message": f"Unknown action type {intent_type!r}; cannot undo.", "retryable": False}
+            raise ToolError(f"Unknown action type {intent_type!r}; cannot undo.")
     except Exception as exc:  # noqa: BLE001 — undo is best-effort; surface structured error
-        return {"error": True, "kind": "server", "message": str(exc), "retryable": True}
+        raise ToolError(str(exc))
 
     delete_undo_snapshot(snap_dir, action_id)
     try:
@@ -344,24 +369,45 @@ async def hubspot_undo_write(ctx: Context, action_id: str) -> Any:
     return {"undo": action_id, "result": outcome}
 
 
-def _register_safety_tools() -> None:
-    for fn in (
-        hubspot_approve_write,
-        hubspot_reject_write,
-        hubspot_list_pending_writes,
-        hubspot_list_recent_audit,
-        hubspot_undo_write,
+def _safety_tool_registrations() -> list[tuple[str, Any, str]]:
+    return [
+        (fn.__name__, fn, (fn.__doc__ or "").strip().split("\n")[0])
+        for fn in (
+            hubspot_approve_write,
+            hubspot_reject_write,
+            hubspot_list_pending_writes,
+            hubspot_list_recent_audit,
+            hubspot_undo_write,
+        )
+    ]
+
+
+def _register_all_tools() -> None:
+    """Register all 81 tools in one name-sorted pass.
+
+    2026-07-28 SHOULDs a deterministic ``tools/list`` order so clients can cache
+    the listing and LLM prompt caches stay warm. Domain and safety tools must be
+    sorted *together* — sorting each group separately still yields two
+    concatenated runs, which is stable but not sorted. Registry order otherwise
+    follows pkgutil module-walk order, which is incidental.
+    """
+    for name, fn, description in sorted(
+        _domain_tool_registrations() + _safety_tool_registrations(), key=lambda r: r[0]
     ):
-        mcp.add_tool(fn)
+        mcp.add_tool(fn, name=name, description=description)
 
 
-_register_domain_tools()
-_register_safety_tools()
+_register_all_tools()
 
 
 def run(transport: str = "stdio", *, host: str | None = None, port: int | None = None) -> None:
-    """Run the MCP server over ``stdio`` (default) or http."""
-    if transport == "http":
-        mcp.run(transport="http", host=host or "127.0.0.1", port=port or 8000)
+    """Run the MCP server over ``stdio`` (default) or Streamable HTTP.
+
+    ``"http"`` is accepted as an alias for the spec's ``"streamable-http"``.
+    The legacy HTTP+SSE transport is deprecated as of 2026-07-28 and is not
+    offered here.
+    """
+    if transport in ("http", "streamable-http"):
+        mcp.run(transport="streamable-http", host=host or "127.0.0.1", port=port or 8000)
     else:
-        mcp.run()
+        mcp.run(transport="stdio")

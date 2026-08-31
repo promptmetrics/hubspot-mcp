@@ -33,10 +33,10 @@ def test_handlers_trimmed_to_tools_only():
     assert sorted(HANDLERS) == ["approve", "reject", "tool"]
 
 
-def test_server_registers_81_tools():
+async def test_server_registers_81_tools():
     from hubspot_mcp import server
 
-    tools = server.mcp.list_tools()
+    tools = await server.mcp.list_tools()
     names = {t.name for t in tools}
     assert len(tools) == 81  # 76 domain + 5 safety
     for safety in (
@@ -50,18 +50,24 @@ def test_server_registers_81_tools():
     assert "hubspot_get_object" in names
 
 
-def test_ctx_excluded_from_tool_schemas():
+async def test_ctx_excluded_from_tool_schemas():
+    """Pins the context-injection seam.
+
+    The SDK resolves the ctx parameter from ``__annotations__`` but builds the
+    schema from ``__signature__``; ``_make_domain_wrapper`` synthesises both, so
+    setting only the signature silently leaks ``ctx`` into all 76 schemas.
+    """
     from hubspot_mcp import server
 
-    tools = {t.name: t for t in server.mcp.list_tools()}
+    tools = {t.name: t for t in await server.mcp.list_tools()}
     # a domain tool: ctx must not appear in its JSON-schema properties
-    props = tools["hubspot_get_object"].parameters.get("properties", {})
+    props = tools["hubspot_get_object"].input_schema.get("properties", {})
     assert "ctx" not in props
     assert set(props) == {"object_id", "object_type"}
     # a safety tool: same
-    assert "ctx" not in tools["hubspot_approve_write"].parameters.get("properties", {})
+    assert "ctx" not in tools["hubspot_approve_write"].input_schema.get("properties", {})
     # the Callable-injection param must be dropped from hubspot_docs_search
-    docs_props = tools["hubspot_docs_search"].parameters.get("properties", {})
+    docs_props = tools["hubspot_docs_search"].input_schema.get("properties", {})
     assert "search_backend" not in docs_props
     assert "query" in docs_props
 
