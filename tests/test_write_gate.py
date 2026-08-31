@@ -168,7 +168,7 @@ async def test_gated_write_still_executes_after_approval(portal):
 
     Guards against trading a bypass for a dead tool.
     """
-    from hubspot_mcp.handlers import execute_pending_write
+    from hubspot_mcp.handlers import ExecuteError, execute_pending_write
 
     gate_client = ExplodingClient()
     preview = await handle_tool(
@@ -180,8 +180,17 @@ async def test_gated_write_still_executes_after_approval(portal):
     action_id = preview["data"]["action_id"]
     assert gate_client.calls == []
 
+    # A raw_api POST has no undo path, so Bounded Autonomy classifies it
+    # FULL_GATE: approval requires the exact impact count, not a bare approve.
+    assert preview["data"]["approval_tier"] == "FULL_GATE"
+    assert preview["data"]["requires_count"] is True
+
     exec_client = RecordingClient()
-    result = await execute_pending_write(portal, action_id, client=exec_client)
+    with pytest.raises(ExecuteError, match="exact impact count"):
+        await execute_pending_write(portal, action_id, client=exec_client)
+    assert exec_client.calls == [], "write executed without the required count"
+
+    result = await execute_pending_write(portal, action_id, confirm_count=1, client=exec_client)
 
     assert exec_client.calls == [("POST", "/crm/v3/objects/contacts")]
     assert result.data["status"] == "success"

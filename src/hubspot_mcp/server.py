@@ -306,15 +306,17 @@ async def hubspot_list_recent_audit(ctx: Context, limit: int = 20) -> Any:
 async def hubspot_undo_write(ctx: Context, action_id: str) -> Any:
     """Undo a previously approved write using its saved snapshot (best-effort).
 
-    Updates restore ``original_values`` via ``hubspot_update_object``; creates
-    delete the recorded ``created_ids`` via ``hubspot_delete_object``; deletes
-    are not undoable. Uses the warm lifespan client. Ports the plugin's
-    ``cli._undo_action`` logic (the orchestrator/CLI path was not ported).
+    Delegates to :func:`handlers.undo_action`, which owns the restore semantics:
+    updates replay only writable properties (replaying read-only system fields
+    makes HubSpot 400 the whole update), every per-record error envelope is
+    checked so a failed restore is never reported as success, creates delete
+    their captured ``created_ids`` tolerating 404s so a retry converges, and
+    deletes/merges are refused outright.
     """
     lf = await _safety_ctx(ctx)
     from hubspot_mcp import audit
+    from hubspot_mcp.handlers import undo_action
     from hubspot_mcp.snapshot import delete_undo_snapshot, load_undo_snapshot, snapshot_dir_for_portal
-    from hubspot_mcp.tools import invoke_tool
 
     portal_id = lf["portal_id"]
     snap_dir = snapshot_dir_for_portal(portal_id)
@@ -322,51 +324,26 @@ async def hubspot_undo_write(ctx: Context, action_id: str) -> Any:
     if snapshot is None:
         raise ToolError(f"No undo snapshot for action {action_id}.")
 
-    metadata = snapshot.get("metadata", {})
-    intent_type = metadata.get("intent_type")
-    object_type = metadata.get("target_object")
-    client = lf["client"]
-
-    if intent_type == "delete":
-        raise ToolError("Deletes are not undoable through HubSpot.")
-    if not metadata.get("undoable", False):
-        raise ToolError("This action is not marked undoable.")
-
-    try:
-        if intent_type == "update":
-            original_values = snapshot.get("original_values", {})
-            if not original_values:
-                raise ToolError("No original values recorded; cannot undo update.")
-            for object_id, properties in original_values.items():
-                await invoke_tool(
-                    "hubspot_update_object", portal_id,
-                    object_id=str(object_id), object_type=str(object_type), properties=properties, client=client,
-                )
-            outcome = f"Restored {len(original_values)} {object_type or 'record(s)'} to original values."
-        elif intent_type == "create":
-            created_ids = metadata.get("created_ids", [])
-            if not created_ids:
-                raise ToolError("No created IDs recorded; cannot undo create.")
-            for object_id in created_ids:
-                await invoke_tool(
-                    "hubspot_delete_object", portal_id,
-                    object_id=str(object_id), object_type=str(object_type), client=client,
-                )
-            outcome = f"Deleted {len(created_ids)} created {object_type or 'record(s)'} to undo the create."
-        else:
-            raise ToolError(f"Unknown action type {intent_type!r}; cannot undo.")
-    except Exception as exc:  # noqa: BLE001 — undo is best-effort; surface structured error
-        raise ToolError(str(exc))
+    succeeded, message = await undo_action(
+        snapshot, portal_id, lf["portal_config"], client=lf["client"]
+    )
+    if not succeeded:
+        # A failed undo KEEPS the snapshot -- it is the only reconciliation
+        # artifact -- and writes no audit entry, so the log never records an
+        # undo that did not happen.
+        raise ToolError(message)
 
     delete_undo_snapshot(snap_dir, action_id)
     try:
         audit.log_write(
-            portal_id=portal_id, action=f"undo:{action_id}",
-            agent=intent_type or "unknown", result_summary={"message": outcome},
+            portal_id=portal_id,
+            action=f"undo:{action_id}",
+            agent=(snapshot.get("metadata") or {}).get("intent_type") or "unknown",
+            result_summary={"message": message},
         )
     except Exception:  # noqa: BLE001 — audit failure must not mask a successful undo
         pass
-    return {"undo": action_id, "result": outcome}
+    return {"undo": action_id, "result": message}
 
 
 def _safety_tool_registrations() -> list[tuple[str, Any, str]]:
