@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from hubspot_mcp.checkpoint import CheckpointManager
 from hubspot_mcp.client import HubSpotClient
@@ -31,11 +31,15 @@ async def hubspot_get_object(
     object_type: str,
     client: HubSpotClient,
     portal_id: str,
+    properties: list[str] | None = None,
 ) -> dict[str, Any]:
     _validate_object_type(object_type, portal_id)
+    path = f"/crm/v3/objects/{object_type}/{quote(object_id, safe='')}"
+    if properties:
+        path += "?" + urlencode({"properties": ",".join(properties)})
     try:
         resp = await client.get(
-            f"/crm/v3/objects/{object_type}/{quote(object_id, safe='')}",
+            path,
             portal_id=portal_id,
             expected_scopes=[f"crm.objects.{object_type}.read"],
         )
@@ -145,22 +149,29 @@ _BATCH_SIZE = 100
 
 def _partition_records(
     records: list[dict[str, Any]], unique_key: str
-) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int]:
     seen: dict[str, dict[str, Any]] = {}
     creates: list[dict[str, Any]] = []
     updates: list[dict[str, Any]] = []
+    skipped_duplicates = 0
     for record in records:
         key = str(record.get(unique_key, "")).lower().strip()
         if key and key in seen:
+            # Bug 8d: a repeated unique_key is dropped silently — count it so the
+            # result's succeeded + failed + skipped_duplicates reconciles to total.
+            skipped_duplicates += 1
             continue
         if key:
             seen[key] = record
         obj_id = record.get("id") or record.get("hs_object_id")
+        # id/hs_object_id are read-only in HubSpot; leaving them inside
+        # `properties` 400s the whole batch.
+        props = {k: v for k, v in record.items() if k not in ("id", "hs_object_id")}
         if obj_id:
-            updates.append({"id": str(obj_id), "properties": record})
+            updates.append({"id": str(obj_id), "properties": props})
         else:
-            creates.append({"properties": record})
-    return seen, creates, updates
+            creates.append({"properties": props})
+    return seen, creates, updates, skipped_duplicates
 
 
 def _chunk(inputs: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
@@ -177,7 +188,7 @@ async def hubspot_batch_upsert_objects(
     action_id: str | None = None,
 ) -> dict[str, Any]:
     _validate_object_type(object_type, portal_id)
-    _, creates, updates = _partition_records(records, unique_key)
+    _, creates, updates, skipped_duplicates = _partition_records(records, unique_key)
 
     import uuid
     aid = action_id or str(uuid.uuid4())[:8]
@@ -210,9 +221,13 @@ async def hubspot_batch_upsert_objects(
             chunk_errors.extend(body.get("errors", []))
         except (HubSpotError, RateLimitError, ScopeError) as exc:
             chunk_errors.append({"message": str(exc), "category": "BATCH_CREATE"})
+            # The whole POST failed: nothing in this chunk landed.
+            chunk_failed = len(chunk)
+        else:
+            chunk_failed = len(chunk_errors)
         errors.extend(chunk_errors)
         last_error = chunk_errors[0].get("message") if chunk_errors else None
-        checkpoint.record_chunk(idx, "batch_create", len(chunk) - len(chunk_errors), len(chunk_errors), chunk_errors)
+        checkpoint.record_chunk(idx, "batch_create", chunk_succeeded, chunk_failed, chunk_errors)
         progress.record_chunk(idx, chunk_succeeded, len(chunk_errors), last_error)
 
     for idx, chunk in enumerate(update_chunks):
@@ -232,9 +247,14 @@ async def hubspot_batch_upsert_objects(
             chunk_errors.extend(body.get("errors", []))
         except (HubSpotError, RateLimitError, ScopeError) as exc:
             chunk_errors.append({"message": str(exc), "category": "BATCH_UPDATE"})
+            chunk_failed = len(chunk)
+        else:
+            chunk_failed = len(chunk_errors)
         errors.extend(chunk_errors)
         last_error = chunk_errors[0].get("message") if chunk_errors else None
-        checkpoint.record_chunk(idx, "batch_update", len(chunk) - len(chunk_errors), len(chunk_errors), chunk_errors)
+        # Offset like progress does so create/update chunks don't collide in
+        # the shared checkpoint JSONL (last_completed_chunk stays monotonic).
+        checkpoint.record_chunk(len(create_chunks) + idx, "batch_update", chunk_succeeded, chunk_failed, chunk_errors)
         progress.record_chunk(len(create_chunks) + idx, chunk_succeeded, len(chunk_errors), last_error)
 
     checkpoint.finalize()
@@ -243,6 +263,7 @@ async def hubspot_batch_upsert_objects(
     return {
         "succeeded": created_count + updated_count,
         "failed": len(errors),
+        "skipped_duplicates": skipped_duplicates,
         "total": len(records),
         "results": results,
         "errors": errors,

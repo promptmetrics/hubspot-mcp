@@ -185,3 +185,46 @@ async def test_gated_write_still_executes_after_approval(portal):
 
     assert exec_client.calls == [("POST", "/crm/v3/objects/contacts")]
     assert result.data["status"] == "success"
+
+
+# --- OAuth state path traversal (upstream M1, 457237b) ----------------------
+
+class TestOAuthStateTraversal:
+    """The OAuth ``state`` returns verbatim from the callback URL, so it is
+    attacker-influenceable and must be validated before it builds a path.
+    ``../<portal_id>`` resolved to the portal's stored token file, which
+    ``_clear_oauth_state`` unlinks — a forced-re-auth denial of service."""
+
+    @staticmethod
+    def _isolated(tmp_path, monkeypatch):
+        from hubspot_mcp import oauth_flow
+
+        monkeypatch.setattr(oauth_flow, "CONFIG_DIR", tmp_path)
+        return oauth_flow
+
+    def test_crafted_state_cannot_delete_the_portal_token(self, tmp_path, monkeypatch):
+        oauth_flow = self._isolated(tmp_path, monkeypatch)
+        victim = tmp_path / "99999999.json"
+        victim.write_text('{"token": "portal-token"}')
+
+        oauth_flow._clear_oauth_state("../99999999")
+
+        assert victim.exists(), "crafted OAuth state deleted the portal token file"
+
+    def test_crafted_state_reads_nothing(self, tmp_path, monkeypatch):
+        oauth_flow = self._isolated(tmp_path, monkeypatch)
+        (tmp_path / "99999999.json").write_text('{"expires_at": 99999999999}')
+
+        assert oauth_flow._load_oauth_state("../99999999") is None
+
+    def test_state_file_rejects_separators_and_dot_segments(self, tmp_path, monkeypatch):
+        import pytest
+
+        oauth_flow = self._isolated(tmp_path, monkeypatch)
+        for bad in ("../evil", "a/b", "", "x" * 129, "nul\x00byte"):
+            with pytest.raises(ValueError, match="Invalid OAuth state"):
+                oauth_flow._oauth_state_file(bad)
+
+    def test_legitimate_state_still_resolves(self, tmp_path, monkeypatch):
+        oauth_flow = self._isolated(tmp_path, monkeypatch)
+        assert oauth_flow._oauth_state_file("aB3-_x").name == "aB3-_x.json"

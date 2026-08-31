@@ -3,31 +3,9 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
-from hubspot_mcp.blueprints.workflows import get_blueprint
+from hubspot_mcp.blueprints.workflows import get_blueprint, list_blueprints, reload_blueprints
 from hubspot_mcp.blueprints.workflows.converter import blueprint_to_v4_payload
 
-# Trigger blueprint self-registration
-from hubspot_mcp.blueprints.workflows import (  # noqa: F401
-    deal_stage_task,
-    lead_scoring,
-    re_anniversary_touch,
-    re_buyer_appraisal_alert,
-    re_buyer_criteria_match,
-    re_buyer_financing_alert,
-    re_buyer_inspection_alert,
-    re_closing_day,
-    re_engagement,
-    re_hygiene_unassigned,
-    re_offer_present_seller,
-    re_open_house_followup,
-    re_pre_listing_prep,
-    re_showing_feedback,
-    re_speed_to_lead,
-    re_stale_buyer_deal,
-    re_stale_listing,
-    re_vendor_expiry,
-    welcome_email,
-)
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.errors import HubSpotError, RateLimitError, ScopeError
 from hubspot_mcp.tools import tool
@@ -69,36 +47,77 @@ async def hubspot_list_workflows(
 @tool(name="hubspot_create_workflow", description="Create a new HubSpot workflow.")
 async def hubspot_create_workflow(
     name: str,
-    workflow_type: str,
-    actions: list[dict[str, Any]],
+    object_type: str,
     enrollment: dict[str, Any],
+    actions: list[dict[str, Any]],
     client: HubSpotClient,
     portal_id: str,
 ) -> dict[str, Any]:
+    """Create a workflow via the V4 Flows API.
+
+    ``object_type`` (e.g. "Contact-based", "Deal-based") resolves both the V4
+    ``objectTypeId`` and ``type``. ``enrollment`` and ``actions`` use the
+    blueprint-spec shape consumed by ``blueprint_to_v4_payload``; see the
+    blueprint modules for examples.
+    """
+    spec = {
+        "name": name,
+        "object_type": object_type,
+        "enrollment": enrollment,
+        "actions": actions,
+    }
     try:
+        payload = blueprint_to_v4_payload(spec)
         resp = await client.post(
             "/automation/v4/flows",
             portal_id=portal_id,
-            body={"name": name, "type": workflow_type, "actions": actions, "enrollment": enrollment},
+            body=payload,
             expected_scopes=["automation"],
         )
         return resp.body
     except (HubSpotError, RateLimitError, ScopeError) as exc:
         return {"error": str(exc), "tool": "hubspot_create_workflow"}
+    except ValueError as exc:
+        return {
+            "error": str(exc),
+            "tool": "hubspot_create_workflow",
+            "hint": (
+                "Use the blueprint-spec shape for enrollment/actions, or use "
+                "hubspot_create_workflow_from_blueprint for a template."
+            ),
+        }
+
+
+# Server-managed fields the V4 docs say to remove from a GET response before
+# re-PUTting it as an update; keeping them causes validation errors.
+_PUT_STRIP_FIELDS = ("createdAt", "updatedAt", "dataSources", "id")
+
+
+def _strip_for_put(body: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in body.items() if k not in _PUT_STRIP_FIELDS}
 
 
 @tool(name="hubspot_update_workflow", description="Update an existing HubSpot workflow.")
 async def hubspot_update_workflow(
     workflow_id: str,
-    updates: dict[str, Any],
+    revision_id: str,
+    body: dict[str, Any],
     client: HubSpotClient,
     portal_id: str,
 ) -> dict[str, Any]:
+    """Update a workflow via the V4 Flows API (PUT).
+
+    V4 requires PUT with the workflow's current ``revisionId`` in the body, and
+    any field omitted from the body is deleted from the workflow. ``body`` must
+    therefore be a *full* workflow payload — typically a prior GET response,
+    optionally with caller edits merged in. GET the workflow first to obtain
+    ``revision_id`` and the current body.
+    """
     try:
-        resp = await client.patch(
+        resp = await client.put(
             f"/automation/v4/flows/{quote(workflow_id, safe='')}",
             portal_id=portal_id,
-            body=updates,
+            body={**_strip_for_put(body), "revisionId": revision_id},
             expected_scopes=["automation"],
         )
         return resp.body
@@ -146,7 +165,7 @@ async def hubspot_toggle_workflow(
 
 @tool(
     name="hubspot_create_workflow_from_blueprint",
-    description="Create a new HubSpot workflow from a blueprint template.",
+    description="Create a new HubSpot workflow from a blueprint (shipped template or one extracted from another portal).",
 )
 async def hubspot_create_workflow_from_blueprint(
     blueprint_name: str,
@@ -155,17 +174,19 @@ async def hubspot_create_workflow_from_blueprint(
     params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
+        # Fresh processes load only packaged blueprints at import (by design, for
+        # test isolation). Reload from disk so a user-promoted blueprint is visible
+        # to this create call in any process — daemon, in-process CLI, or fresh run.
+        reload_blueprints()
         blueprint = get_blueprint(blueprint_name)
         if blueprint is None:
-            available = [b.name for b in __import__(
-                "hubspot_mcp.blueprints.workflows", fromlist=["list_blueprints"]
-            ).list_blueprints()]
+            available = [b.name for b in list_blueprints()]
             return {
                 "error": f"Blueprint '{blueprint_name}' not found.",
                 "available_blueprints": available,
             }
 
-        merged_params = params or {}
+        merged_params = dict(params or {})
         # Merge parameter defaults from blueprint schema
         for key, info in blueprint.parameter_schema.items():
             if key not in merged_params:
@@ -202,6 +223,8 @@ async def hubspot_create_workflow_from_blueprint(
                 "property-relative task due dates (e.g. '{{deadline - 5d}}'), "
                 "unknown custom-object event triggers, placeholder team IDs, missing marketing email content_id, "
                 "or missing custom properties/deal stages in the target portal. "
-                "Build those workflows manually in the HubSpot UI."
+                "For a workflow that already exists in a portal, extract it with "
+                "hubspot_extract_workflow_blueprint, parameterize the draft, then promote and "
+                "create from it; build the rest manually in the HubSpot UI."
             ),
         }
