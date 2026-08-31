@@ -147,3 +147,25 @@ async def test_reads_are_never_round_tripped(server_with_portal):
 
     assert asked is False
     assert http.calls == [("GET", "/crm/v3/objects/contacts/1")]
+
+
+async def test_resume_resolves_the_pending_write_instead_of_minting_another(
+    server_with_portal,
+):
+    """The retry must resolve the EXISTING preview, not re-run the tool.
+
+    The client answers a confirmation by re-sending the same tool call. If the
+    wrapper fell through to ``handle_tool`` again it would mint a second pending
+    preview and orphan the first, leaving an un-approvable record on disk
+    forever. Pinned directly rather than relying on the single-POST assertion
+    above to notice it.
+    """
+    from hubspot_mcp.persistence import list_pending
+
+    server, http = server_with_portal
+    async with Client(server.mcp, elicitation_callback=_accept) as client:
+        await client.call_tool("hubspot_raw_api", RAW_ARGS)
+
+    assert http.calls == [("POST", "/crm/v3/objects/contacts")]
+    # The approved preview is cleared on execute, and no second one was created.
+    assert list_pending("99999999") == []
