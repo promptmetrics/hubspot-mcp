@@ -37,6 +37,7 @@ import typing
 from contextlib import asynccontextmanager
 from typing import Any
 
+import mcp_types as T
 from mcp.server.caching import CacheHint
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -213,6 +214,100 @@ def _domain_params(func: Any) -> list[inspect.Parameter]:
     return out
 
 
+
+# --- Multi Round-Trip Requests (SEP-2322) ------------------------------------
+#
+# 2026-07-28 removes the server-initiated back-channel, so ``ctx.elicit`` raises
+# NoBackChannelError. The replacement is MRTR: a tool returns
+# ``resultType: "input_required"`` naming what it still needs, and the client
+# retries the SAME call with ``inputResponses`` plus the opaque ``requestState``
+# the server minted. That collapses the write gate from two tool calls
+# (write -> hubspot_approve_write) into one round-tripped call.
+#
+# Strictly opt-in: a client that has not declared the form-elicitation
+# capability gets ``MCPError: Elicitation not supported`` for the whole call, so
+# every write would break. When the capability is absent we return the ordinary
+# preview and the classic approve/reject tools remain the path -- which is also
+# what handshake-era clients and cross-session approvals need.
+
+_CONFIRM_KEY = "confirm"
+
+
+def _supports_form_elicitation(ctx: Context) -> bool:
+    caps = getattr(ctx, "client_capabilities", None)
+    elicitation = getattr(caps, "elicitation", None) if caps else None
+    return getattr(elicitation, "form", None) is not None
+
+
+def _confirmation_request(data: dict[str, Any]) -> "T.InputRequiredResult":
+    """Build the input_required result for a pending write preview."""
+    action_id = data["action_id"]
+    impact = data.get("impact_count", 1)
+    requires_count = bool(data.get("requires_count"))
+    tier = data.get("approval_tier")
+
+    properties: dict[str, Any] = {
+        "approve": {"type": "boolean", "description": "Apply this write."}
+    }
+    required = ["approve"]
+    if requires_count:
+        # FULL_GATE keeps the typed-count ceremony: the operator must state the
+        # impact back, which is the whole point of the destructive gate.
+        properties["confirm_count"] = {
+            "type": "integer",
+            "description": f"Type the exact number of affected records ({impact}) to confirm.",
+        }
+        required.append("confirm_count")
+
+    lines = [
+        f"Approve {data.get('tool')} on {impact} record(s)?",
+        f"action_id: {action_id}  tier: {tier}",
+    ]
+    pattern = data.get("pattern")
+    if pattern:
+        lines.append(f"Pattern rule matches {pattern.get('count')} record(s).")
+    if data.get("original_values"):
+        lines.append(f"Captured {len(data['original_values'])} record(s) for undo.")
+    else:
+        lines.append("No values captured — this write will NOT be undoable.")
+
+    return T.InputRequiredResult(
+        input_requests={
+            _CONFIRM_KEY: T.ElicitRequest(
+                method="elicitation/create",
+                params=T.ElicitRequestFormParams(
+                    mode="form",
+                    message="\n".join(lines),
+                    requested_schema={
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
+                ),
+            )
+        },
+        # The action_id is the server-minted handle the spec asks for; the
+        # pending preview itself stays on disk, so the retry may land on any
+        # process (SEP-2567).
+        request_state=action_id,
+    )
+
+
+def _mrtr_answer(ctx: Context) -> tuple[str, bool, int | None] | None:
+    """Return ``(action_id, approved, confirm_count)`` when resuming, else None."""
+    responses = getattr(ctx, "input_responses", None)
+    action_id = getattr(ctx, "request_state", None)
+    if not responses or not action_id:
+        return None
+    answer = responses.get(_CONFIRM_KEY)
+    if answer is None:
+        return None
+    if getattr(answer, "action", None) != "accept":
+        return (action_id, False, None)
+    content = getattr(answer, "content", None) or {}
+    return (action_id, bool(content.get("approve")), content.get("confirm_count"))
+
+
 def _make_domain_wrapper(tool_def: ToolDef):
     """Build an async MCP wrapper that delegates one tool to ``handle_tool``."""
     domain_params = _domain_params(tool_def.func)
@@ -226,13 +321,45 @@ def _make_domain_wrapper(tool_def: ToolDef):
         lf = _lifespan(ctx)
         if lf.get("auth_error"):
             raise ToolError(lf["auth_error"])
+
+        # MRTR resume: this retry carries the operator's answer plus the
+        # action_id minted on the first round. Resolve the pending preview
+        # instead of re-running the tool, which would mint a second one.
+        answer = _mrtr_answer(ctx)
+        if answer is not None:
+            action_id, approved, confirm_count = answer
+            handler, params = (
+                (handle_approve, {"action_id": action_id, "confirm_count": confirm_count})
+                if approved
+                else (handle_reject, {"action_id": action_id})
+            )
+            try:
+                result = await handler(
+                    lf["client"], lf["cache"], lf["portal_config"], params
+                )
+            except HandlerError as exc:
+                raise ToolError(exc.error["message"]) from exc
+            return _raise_if_error(result["data"])
+
         try:
             result = await handle_tool(
                 lf["client"], lf["cache"], lf["portal_config"], {"tool_name": name, "input": kwargs}
             )
         except HandlerError as exc:
             raise ToolError(exc.error["message"]) from exc
-        return _raise_if_error(result["data"])
+        data = _raise_if_error(result["data"])
+
+        # A write that needs a human decision asks for it inline, when the
+        # client can answer. AUTO-tier writes already applied and never reach
+        # here with status "preview".
+        if (
+            isinstance(data, dict)
+            and data.get("status") == "preview"
+            and data.get("action_id")
+            and _supports_form_elicitation(ctx)
+        ):
+            return _confirmation_request(data)
+        return data
 
     wrapper.__name__ = name
     wrapper.__qualname__ = name
