@@ -84,7 +84,12 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command")
 
     run_p = sub.add_parser("run", help="Run the MCP server (default)")
-    run_p.add_argument("--transport", choices=("stdio", "http"), default="stdio")
+    run_p.add_argument(
+        "--transport",
+        choices=("stdio", "streamable-http", "http"),
+        default="stdio",
+        help="stdio (default) or streamable-http; 'http' is an alias for streamable-http",
+    )
     run_p.add_argument("--host", default=None)
     run_p.add_argument("--port", type=int, default=None)
     run_p.set_defaults(func=_cmd_server)

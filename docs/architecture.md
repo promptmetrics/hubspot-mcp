@@ -65,10 +65,17 @@ Each decision: rationale, alternatives rejected, evidence.
 - **Rejected:** Building the full remote OAuth server first (5–10 dev-days + hosting + Cowork-OAuth risk before any user value).
 - **Evidence:** Static-token auth is confirmed supported in Claude Code CLI (`claude mcp add --header "Authorization: Bearer …"`, fixed in v2.1.119 per `#47424`) and confirmed **not** supported in Cowork (requires OAuth 2.1+PKCE user consent).
 
-### D3 — Use FastMCP as the server framework
+### D3 — Use FastMCP as the server framework  ~~(superseded by D9)~~
 - **Rationale:** FastMCP supports both stdio and streamable-HTTP transports and both static-token and OAuthProxy auth modes in one codebase. `axonops/hubspot-mcp` (Python, FastMCP, May 2026) already proves the dual-mode pattern for HubSpot specifically. This makes Phase 2 (transport flip) and Phase 3 (auth swap) config/layer changes, not rewrites.
 - **Rejected:** Raw `stdin`/`stdout` handling (paints into a corner); TypeScript-only bridges like `CooperNiebuhr/mcp-server-bridge` (our codebase is Python).
 - **Evidence:** FastMCP `OAuthProxy` docs; `axonops/hubspot-mcp` dual `token`/`oauth` mode.
+
+### D9 — Migrate from FastMCP to the official `mcp` SDK (supersedes D3), 2026-08-31
+- **Rationale:** D3 predates protocol revision `2026-07-28`, which removes the `initialize`/`notifications/initialized` handshake and the `Mcp-Session-Id` header, adds `server/discover`, requires `Mcp-Method`/`Mcp-Name` headers on Streamable HTTP POSTs, adds a required `resultType` on every result, and requires `ttlMs`/`cacheScope` on list results (SEP-2549). FastMCP 3.x depends on `mcp<2.0` and speaks the handshake era only; the official `mcp` SDK shipped 2.0.0 on the spec release date and is the reference implementation. Verified: this server negotiates `2026-07-28` and *also* still serves handshake-era clients down to `2024-11-05` via `initialize`, so no client is locked out.
+- **Rejected:** FastMCP 4.0 (built on `mcp>=2.0`, so it does reach the new spec, but it is beta — 4.0.0b5 as of 2026-08-28 — and the FastMCP-specific auth/middleware surface is not needed here); staying on FastMCP 3.x (stable, but cannot reach `2026-07-28` at all).
+- **Consequences:** `MCPServer` replaces `FastMCP`; the `_lifespan` compat shim is deleted; `transport="http"` becomes `"streamable-http"` (`"http"` kept as a CLI alias); the legacy HTTP+SSE transport is deprecated upstream and is not offered. `mcp` pulls `httpx2` for its own transport while `client.py` stays on `httpx` — deliberate, because `pytest-httpx` and `respx` target `httpx` and moving the HubSpot client would strand the test suite's HTTP mocking.
+- **Two migration seams worth remembering:** (1) the SDK resolves the context parameter from `__annotations__` (via `typing.get_type_hints`) but builds the JSON schema from `__signature__`; `_make_domain_wrapper` synthesises both, and setting only the signature silently leaks `ctx` into all 76 domain schemas. (2) Tool errors returned as data reach the client as *successful* results — anticipated failures must raise `ToolError` so the protocol layer sets `is_error`. `tests/test_protocol_conformance.py` pins both.
+- **Evidence:** `mcp` 2.1.1 on PyPI (2026-08-25); `mcp_types.version.LATEST_PROTOCOL_VERSION == "2026-07-28"`; spec changelog SEP-2549/2567/2575/2322.
 
 ### D4 — Static private-app token auth for Phase 1 & 2; OAuth 2.1+PKCE deferred to Phase 3
 - **Rationale:** Private-app tokens (`pat-na1-…`) are single-user, no consent flow, no token store, no refresh logic — minimal. They work for the CLI audience immediately. OAuth is required only for Cowork's multi-user consent model.
@@ -324,7 +331,7 @@ hubspot-mcp/
 
 Reviewers, please focus on:
 - [ ] **Section 5 (cross-phase principles).** Are the six interface boundaries correct? Anything that would force a rewrite in P3?
-- [ ] **D3 (FastMCP).** Any reason to prefer a different framework (e.g., raw MCP SDK, mcp-proxy)?
+- [x] **D3 (FastMCP).** ~~Any reason to prefer a different framework?~~ Resolved by **D9** — migrated to the official `mcp` SDK for `2026-07-28` support.
 - [ ] **D5 (orchestration in plugin, stateful tools for safety).** Is exposing the preview/approve state machine as MCP tools (`create_write_plan` / `approve_write_plan`) the right boundary, vs. some other pattern?
 - [ ] **D7 (Cloud Run + Upstash).** Any org constraint (existing infra, AWS-only, data residency) that changes the host choice?
 - [ ] **Section 6 Path B crux.** Should we de-risk the plugin-bundled-local-MCP-in-Cowork spike *now*, before P1, since it could make P3 unnecessary?

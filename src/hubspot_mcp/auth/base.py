@@ -1,7 +1,7 @@
 """Token-provider interface for the HubSpot MCP server.
 
 A ``TokenProvider`` resolves the active portal's :class:`PortalConfig` (with a
-usable access token) for the FastMCP lifespan. The provider does *not* run an
+usable access token) for the server lifespan. The provider does *not* run an
 interactive auth flow — that lives in the ``hubspot-mcp auth`` subcommand. When
 a portal has not yet been authenticated, ``resolve`` raises
 :class:`NotAuthenticatedError` so the MCP server fails fast with actionable
