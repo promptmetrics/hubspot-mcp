@@ -27,7 +27,11 @@ from hubspot_mcp.persistence import clear as _clear_pending
 from hubspot_mcp.persistence import confirm as _confirm_pending
 from hubspot_mcp.persistence import load as _load_pending
 from hubspot_mcp.safety import apply_write
-from hubspot_mcp.scope_registry import get_required_scopes
+from hubspot_mcp.scope_registry import (
+    RAW_API_WRITE_METHODS,
+    WRITE_TOOLS,
+    get_required_scopes,
+)
 from hubspot_mcp.snapshot import (
     delete_undo_snapshot,
     save_undo_snapshot_for_action,
@@ -64,17 +68,49 @@ def _ok(data: Any) -> dict[str, Any]:
     return {"ok": True, "data": data}
 
 
-def _is_write_tool(required_scopes: set[str]) -> bool:
+def _raw_api_method(tool_input: dict[str, Any] | None) -> str:
+    return str((tool_input or {}).get("method", "")).upper()
+
+
+def _is_write_tool(
+    required_scopes: set[str],
+    tool_name: str | None = None,
+    tool_input: dict[str, Any] | None = None,
+) -> bool:
+    # ``hubspot_raw_api`` is a write only for mutating HTTP verbs; a GET is a
+    # read. Classify by the request method so raw_api reads stay on the fast path
+    # and raw_api writes hit the HITL gate.
+    if tool_name == "hubspot_raw_api":
+        return _raw_api_method(tool_input) in RAW_API_WRITE_METHODS
+    # Scope-suffix covers crm.objects.*.write/.delete etc. Tools whose scope set
+    # has no write/delete suffix (workflows' bare ``automation``, single-scope
+    # ``forms``/``reports``, and set()-registered refund/import/export) need an
+    # explicit name match against scope_registry.WRITE_TOOLS to hit the gate.
+    if tool_name is not None and tool_name in WRITE_TOOLS:
+        return True
     return any(s.endswith(suffix) for s in required_scopes for suffix in _WRITE_SCOPE_SUFFIXES)
 
 
-def _tool_risk_level(required_scopes: set[str]) -> RiskLevel:
+def _tool_risk_level(
+    required_scopes: set[str],
+    tool_name: str | None = None,
+    tool_input: dict[str, Any] | None = None,
+) -> RiskLevel:
+    # A raw_api DELETE is destructive even though its registry scope set is empty,
+    # so the destructive-count gate must fire for it.
+    if tool_name == "hubspot_raw_api" and _raw_api_method(tool_input) == "DELETE":
+        return RiskLevel.DESTRUCTIVE
     if any(s.endswith(".delete") for s in required_scopes):
         return RiskLevel.DESTRUCTIVE
     return RiskLevel.MEDIUM
 
 
-def _tool_intent_type(tool_name: str) -> str:
+def _tool_intent_type(tool_name: str, tool_input: dict[str, Any] | None = None) -> str:
+    if tool_name == "hubspot_raw_api":
+        method = _raw_api_method(tool_input)
+        if method == "DELETE":
+            return "delete"
+        return "write"
     if "delete" in tool_name:
         return "delete"
     if "create" in tool_name:
@@ -107,7 +143,7 @@ async def _build_tool_preview(
 ):
     from hubspot_mcp.models import PreviewResult
 
-    risk = _tool_risk_level(required_scopes)
+    risk = _tool_risk_level(required_scopes, tool_name, tool_input)
     original_values: dict[str, Any] = {}
     if tool_name in ("hubspot_update_object", "hubspot_delete_object"):
         object_id = tool_input.get("object_id")
@@ -173,13 +209,13 @@ async def handle_tool(client, cache, portal_config: PortalConfig, params: dict[s
     # matching the agent path's initialize_session).  No-op for standard types.
     await ensure_custom_schema_cached(portal_config, target_object)
 
-    if not _is_write_tool(required_scopes):
+    if not _is_write_tool(required_scopes, tool_name, tool_input):
         result = await invoke_tool(tool_name, portal_id, client=client, **_tool_kwargs(tool_input))
         return _ok({"tool": tool_name, "result": result})
 
-    risk = _tool_risk_level(required_scopes)
+    risk = _tool_risk_level(required_scopes, tool_name, tool_input)
     intent = TaskIntent(
-        intent_type=_tool_intent_type(tool_name),
+        intent_type=_tool_intent_type(tool_name, tool_input),
         target_object=target_object,
         description=f"tool {tool_name}",
         risk_level=risk,

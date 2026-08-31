@@ -357,3 +357,41 @@ def get_required_scopes_for_agent(agent_name: str, target_object: str | None = N
     if not tools:
         return set()
     return get_required_scopes(tools, target_object)
+
+
+# Tools that mutate portal state but whose registry scope set has no ``.write``/
+# ``.delete`` suffix, so the scope-suffix ``_is_write_tool`` check misses them and
+# they would POST with no HITL preview. This explicit set is the second
+# predicate: a tool is a write if its scopes have a write/delete suffix OR its
+# name is in ``WRITE_TOOLS``.
+#
+# Two families land here:
+#   1. Workflow writes carry the bare ``{"automation"}`` scope (no suffix). No
+#      workflow ``delete`` tool exists, so the five writes are
+#      create/update/enroll/toggle/create-from-blueprint.
+#   2. Single-scope or set()-registered writes: ``forms``/``reports`` are single
+#      read+write scopes (no suffix), and refund/import/export carry CRM scopes
+#      that are not requested at authorize time so their registry entry is
+#      ``set()``. All are real POSTs and must pass the HITL gate.
+#      ``hubspot_raw_api`` is NOT listed here because it is a write only for
+#      mutating verbs — handlers._is_write_tool inspects its request method (a
+#      GET via raw_api is a read).
+WRITE_TOOLS: set[str] = {
+    "hubspot_create_workflow",
+    "hubspot_update_workflow",
+    "hubspot_enroll_workflow",
+    "hubspot_toggle_workflow",
+    "hubspot_create_workflow_from_blueprint",
+    "hubspot_create_refund",
+    "hubspot_import_data",
+    "hubspot_export_data",
+    "hubspot_create_form",
+    "hubspot_create_report",
+    "hubspot_create_dashboard",
+    "hubspot_schedule_email",
+}
+
+# ``hubspot_raw_api`` request methods that mutate portal state. A raw_api call
+# with one of these methods must route through the HITL write gate; a GET is a
+# read. DELETE is additionally treated as destructive (see handlers).
+RAW_API_WRITE_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
