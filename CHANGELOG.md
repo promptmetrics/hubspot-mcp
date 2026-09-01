@@ -20,6 +20,22 @@ Groundwork for serving over HTTPS. No user-facing behaviour change on stdio.
   path cannot be honoured by a remote store, and the previous shape leaked the
   server's home directory into the tool result. Action ids are also what
   `hubspot_approve_write` / `hubspot_reject_write` actually take.
+### Phase 2 — Task 5: single-tenant guard
+
+- **An HTTP deployment now refuses to start unless it resolves exactly one
+  portal.** Fatal on a non-loopback bind: no `HUBSPOT_PORTAL`, a portal read
+  from a `.hubspot-portal` file in the working directory (which on a hosted
+  deployment is a build artifact, so a stray committed file would decide which
+  CRM this writes to), or `HUBSPOT_TOKEN_*` variables for more than one portal.
+- Enforced rather than assumed because `_unadvertise_unavailable_tools` calls
+  `mcp.remove_tool(...)` on the module-level server: a second portal lacking
+  Workflows would unadvertise the workflow tools for the first one too, until
+  the instance recycled. That is a correctness bug, not an inefficiency.
+- Loopback binds only warn, matching the bearer-auth policy — local development
+  stays permissive, anything internet-reachable is strict.
+- Every problem is reported at once, so a misconfigured deployment does not
+  teach you its requirements one redeploy at a time.
+
 ### Phase 2 — Task 4: shared caches
 
 - **New `CacheStore` interface**, separate from `StateStore` because the two

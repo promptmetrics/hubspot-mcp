@@ -194,7 +194,14 @@ def test_secret_is_whitespace_trimmed():
 # --------------------------------------------------------------------------- #
 
 
-def test_build_http_app_wraps_the_transport_when_a_secret_is_set(monkeypatch):
+@pytest.fixture
+def single_portal(monkeypatch):
+    """A hosted app also has to satisfy the single-tenant guard (Task 5)."""
+    monkeypatch.setenv("HUBSPOT_PORTAL", "99999999")
+    monkeypatch.delenv("HUBSPOT_TOKEN_11111111", raising=False)
+
+
+def test_build_http_app_wraps_the_transport_when_a_secret_is_set(monkeypatch, single_portal):
     from hubspot_mcp import server
 
     monkeypatch.setenv(SECRET_ENV, SECRET)
@@ -202,7 +209,7 @@ def test_build_http_app_wraps_the_transport_when_a_secret_is_set(monkeypatch):
     assert isinstance(app, BearerAuthMiddleware)
 
 
-def test_build_http_app_refuses_a_public_bind_without_a_secret(monkeypatch):
+def test_build_http_app_refuses_a_public_bind_without_a_secret(monkeypatch, single_portal):
     """The Vercel entrypoint imports this app; unguarded here means unguarded live."""
     from hubspot_mcp import server
 
@@ -211,7 +218,7 @@ def test_build_http_app_refuses_a_public_bind_without_a_secret(monkeypatch):
         server.build_http_app(PUBLIC_BIND)
 
 
-async def test_healthz_reports_ok_without_credentials(monkeypatch):
+async def test_healthz_reports_ok_without_credentials(monkeypatch, single_portal):
     from hubspot_mcp import __version__, server
 
     monkeypatch.setenv(SECRET_ENV, SECRET)
@@ -222,7 +229,7 @@ async def test_healthz_reports_ok_without_credentials(monkeypatch):
     assert __version__.encode() in body
 
 
-async def test_mcp_endpoint_is_401_without_credentials(monkeypatch):
+async def test_mcp_endpoint_is_401_without_credentials(monkeypatch, single_portal):
     from hubspot_mcp import server
 
     monkeypatch.setenv(SECRET_ENV, SECRET)
