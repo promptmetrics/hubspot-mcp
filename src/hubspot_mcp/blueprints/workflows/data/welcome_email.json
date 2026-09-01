@@ -1,0 +1,68 @@
+{
+  "format_version": 1,
+  "name": "welcome_email",
+  "description": "Send a welcome email to new contacts after an optional delay.",
+  "tags": [
+    "email",
+    "onboarding",
+    "contact"
+  ],
+  "source": {
+    "origin": "shipped"
+  },
+  "notes": [],
+  "flags": [],
+  "parameters": {
+    "name": {
+      "type": "string",
+      "default": "Welcome Email",
+      "description": "Workflow name"
+    },
+    "delay_hours": {
+      "type": "integer",
+      "default": 0,
+      "description": "Delay before sending email"
+    },
+    "subject": {
+      "type": "string",
+      "default": "Welcome!",
+      "description": "Email subject line"
+    },
+    "body": {
+      "type": "string",
+      "default": "Thanks for joining us.",
+      "description": "Email body"
+    }
+  },
+  "spec": {
+    "ui_path": "Settings > Automation > Workflows > Create workflow",
+    "object_type": "Contact-based",
+    "enrollment": {
+      "type": "EVENT_BASED",
+      "trigger": "Contact is created"
+    },
+    "actions": [
+      {
+        "step": 1,
+        "ui_action": "Delay",
+        "fields": {
+          "Delay for": "{{param:delay_hours}} hours"
+        },
+        "include_if": "delay_hours"
+      },
+      {
+        "step": 2,
+        "ui_action": "Send internal email notification",
+        "fields": {
+          "Subject": "{{param:subject}}",
+          "Body": "{{param:body}}"
+        }
+      }
+    ],
+    "prerequisites": [],
+    "validation": [
+      "Create a test contact",
+      "Verify email is sent"
+    ]
+  }
+}

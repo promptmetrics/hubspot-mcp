@@ -1,0 +1,103 @@
+{
+  "format_version": 1,
+  "name": "re_vendor_expiry",
+  "description": "Vendor license expiry alert with 30-day and 7-day escalation.",
+  "tags": [
+    "real-estate",
+    "vendor",
+    "license",
+    "expiry",
+    "escalation"
+  ],
+  "source": {
+    "origin": "shipped"
+  },
+  "notes": [],
+  "flags": [],
+  "parameters": {},
+  "spec": {
+    "ui_path": "Settings > Automation > Workflows > Create workflow",
+    "object_type": "Company-based",
+    "enrollment": {
+      "type": "PROPERTY_BASED",
+      "filter_branch": {
+        "filterBranchType": "OR",
+        "filterBranches": [
+          {
+            "filterBranchType": "AND",
+            "filters": [
+              {
+                "filterType": "PROPERTY",
+                "property": "license_expiration_date",
+                "operation": {
+                  "operationType": "ALL_PROPERTY",
+                  "operator": "IS_KNOWN",
+                  "includeObjectsWithNoValueSet": false
+                }
+              },
+              {
+                "filterType": "PROPERTY",
+                "property": "license_expiration_date",
+                "operation": {
+                  "operationType": "ALL_PROPERTY",
+                  "operator": "IS_LESS_THAN_X_DAYS_FROM_NOW",
+                  "value": 60,
+                  "includeObjectsWithNoValueSet": false
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "actions": [
+      {
+        "step": 1,
+        "ui_action": "Create task",
+        "fields": {
+          "Title": "Vendor license expiring — follow up",
+          "Due date": "{{license_expiration_date - 30d}}",
+          "Assigned to": "{{company.hubspot_owner_id}}",
+          "Priority": "Medium",
+          "Notes": "Vendor license expires within 60 days. Follow up to confirm renewal."
+        }
+      },
+      {
+        "step": 2,
+        "ui_action": "Delay until date",
+        "fields": {
+          "Delay until": "{{license_expiration_date - 7d}}"
+        }
+      },
+      {
+        "step": 3,
+        "ui_action": "If/then branch",
+        "fields": {
+          "Condition property": "license_status",
+          "Operator": "is equal to any of",
+          "Value": "Active"
+        },
+        "true_branch": [
+          {
+            "ui_action": "Create task",
+            "fields": {
+              "Title": "ESCALATE: Vendor license still active but expiring in 7 days",
+              "Due date": "{{timestamp + 1d}}",
+              "Assigned to": "Team lead",
+              "Priority": "High",
+              "Notes": "Vendor license expires in 7 days and status is still Active. Escalate immediately."
+            }
+          }
+        ]
+      }
+    ],
+    "prerequisites": [
+      "Company properties 'license_expiration_date' and 'license_status' exist"
+    ],
+    "validation": [
+      "Create test company with license_expiration_date within 60 days",
+      "Verify task created 30 days before expiry",
+      "Verify escalation fires 7 days before if status still Active"
+    ]
+  }
+}

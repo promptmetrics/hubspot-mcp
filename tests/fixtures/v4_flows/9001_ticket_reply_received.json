@@ -1,0 +1,127 @@
+{
+  "id": "9001",
+  "isEnabled": true,
+  "objectTypeId": "0-5",
+  "flowType": "WORKFLOW",
+  "revisionId": "1",
+  "name": "Change ticket status when a customer replies to an email",
+  "description": "Updates ticket status to \"Waiting on us\" when a customer replies to an email in the support pipeline after the last status update.",
+  "uuid": "ticket-0-email-recieved",
+  "createdAt": "2026-05-05T08:17:28.688Z",
+  "updatedAt": "2026-05-05T08:17:28.688Z",
+  "startActionId": "1",
+  "nextAvailableActionId": "2",
+  "actions": [
+    {
+      "actionId": "1",
+      "actionTypeVersion": 0,
+      "actionTypeId": "0-5",
+      "fields": {
+        "property_name": "hs_pipeline_stage",
+        "value": {
+          "staticValue": "3",
+          "type": "STATIC_VALUE"
+        }
+      },
+      "type": "SINGLE_CONNECTION"
+    }
+  ],
+  "enrollmentCriteria": {
+    "shouldReEnroll": true,
+    "listFilterBranch": {
+      "filterBranches": [],
+      "filters": [
+        {
+          "property": "hs_last_email_activity",
+          "operation": {
+            "operator": "IS_ANY_OF",
+            "includeObjectsWithNoValueSet": false,
+            "values": [
+              "REPLY_FROM_CONTACT"
+            ],
+            "operationType": "ENUMERATION"
+          },
+          "filterType": "PROPERTY"
+        },
+        {
+          "property": "hs_pipeline",
+          "operation": {
+            "operator": "IS_ANY_OF",
+            "includeObjectsWithNoValueSet": false,
+            "values": [
+              "0"
+            ],
+            "operationType": "ENUMERATION"
+          },
+          "filterType": "PROPERTY"
+        },
+        {
+          "property": "hs_last_email_date",
+          "operation": {
+            "operator": "IS_KNOWN",
+            "includeObjectsWithNoValueSet": false,
+            "operationType": "ALL_PROPERTY"
+          },
+          "filterType": "PROPERTY"
+        },
+        {
+          "property": "hs_last_email_date",
+          "operation": {
+            "operator": "IS_AFTER",
+            "includeObjectsWithNoValueSet": false,
+            "timePoint": {
+              "timezoneSource": "CUSTOM",
+              "zoneId": "UTC",
+              "property": "hs_pipeline_stage",
+              "referenceType": "UPDATED_AT",
+              "timeType": "PROPERTY_REFERENCED"
+            },
+            "endpointBehavior": "EXCLUSIVE",
+            "propertyParser": "UPDATED_AT",
+            "type": "TIME_POINT",
+            "operationType": "TIME_POINT"
+          },
+          "filterType": "PROPERTY"
+        }
+      ],
+      "filterBranchType": "AND",
+      "filterBranchOperator": "AND"
+    },
+    "unEnrollObjectsNotMeetingCriteria": false,
+    "reEnrollmentTriggersFilterBranches": [
+      {
+        "filterBranches": [],
+        "filters": [
+          {
+            "property": "hs_name",
+            "operation": {
+              "operator": "IS_EQUAL_TO",
+              "includeObjectsWithNoValueSet": false,
+              "value": "hs_last_email_date",
+              "operationType": "STRING"
+            },
+            "filterType": "PROPERTY"
+          },
+          {
+            "property": "hs_value",
+            "operation": {
+              "operator": "IS_KNOWN",
+              "includeObjectsWithNoValueSet": false,
+              "operationType": "ALL_PROPERTY"
+            },
+            "filterType": "PROPERTY"
+          }
+        ],
+        "filterBranchType": "AND",
+        "filterBranchOperator": "AND"
+      }
+    ],
+    "type": "LIST_BASED"
+  },
+  "timeWindows": [],
+  "blockedDates": [],
+  "customProperties": {},
+  "dataSources": [],
+  "crmObjectCreationStatus": "COMPLETE",
+  "type": "PLATFORM_FLOW"
+}

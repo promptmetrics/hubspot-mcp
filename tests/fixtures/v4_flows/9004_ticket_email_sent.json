@@ -1,0 +1,137 @@
+{
+  "id": "9004",
+  "isEnabled": true,
+  "objectTypeId": "0-5",
+  "flowType": "WORKFLOW",
+  "revisionId": "1",
+  "name": "Change ticket status when an email is sent to a customer",
+  "description": "Updates ticket status to \"Waiting on contact\" when an email is sent to a contact in the support pipeline and the ticket is not in Help Desk.",
+  "uuid": "ticket-0-email-sent",
+  "createdAt": "2026-05-05T08:17:28.705Z",
+  "updatedAt": "2026-05-05T08:17:28.705Z",
+  "startActionId": "1",
+  "nextAvailableActionId": "2",
+  "actions": [
+    {
+      "actionId": "1",
+      "actionTypeVersion": 0,
+      "actionTypeId": "0-5",
+      "fields": {
+        "property_name": "hs_pipeline_stage",
+        "value": {
+          "staticValue": "2",
+          "type": "STATIC_VALUE"
+        }
+      },
+      "type": "SINGLE_CONNECTION"
+    }
+  ],
+  "enrollmentCriteria": {
+    "shouldReEnroll": true,
+    "listFilterBranch": {
+      "filterBranches": [],
+      "filters": [
+        {
+          "property": "hs_last_email_activity",
+          "operation": {
+            "operator": "IS_ANY_OF",
+            "includeObjectsWithNoValueSet": false,
+            "values": [
+              "SENT_TO_CONTACT"
+            ],
+            "operationType": "ENUMERATION"
+          },
+          "filterType": "PROPERTY"
+        },
+        {
+          "property": "hs_pipeline",
+          "operation": {
+            "operator": "IS_ANY_OF",
+            "includeObjectsWithNoValueSet": false,
+            "values": [
+              "0"
+            ],
+            "operationType": "ENUMERATION"
+          },
+          "filterType": "PROPERTY"
+        },
+        {
+          "property": "hs_last_email_date",
+          "operation": {
+            "operator": "IS_KNOWN",
+            "includeObjectsWithNoValueSet": false,
+            "operationType": "ALL_PROPERTY"
+          },
+          "filterType": "PROPERTY"
+        },
+        {
+          "property": "hs_last_email_date",
+          "operation": {
+            "operator": "IS_AFTER",
+            "includeObjectsWithNoValueSet": false,
+            "timePoint": {
+              "timezoneSource": "CUSTOM",
+              "zoneId": "UTC",
+              "property": "hs_pipeline_stage",
+              "referenceType": "UPDATED_AT",
+              "timeType": "PROPERTY_REFERENCED"
+            },
+            "endpointBehavior": "EXCLUSIVE",
+            "propertyParser": "UPDATED_AT",
+            "type": "TIME_POINT",
+            "operationType": "TIME_POINT"
+          },
+          "filterType": "PROPERTY"
+        },
+        {
+          "property": "hs_in_helpdesk",
+          "operation": {
+            "operator": "IS_NOT_EQUAL_TO",
+            "includeObjectsWithNoValueSet": true,
+            "value": true,
+            "operationType": "BOOL"
+          },
+          "filterType": "PROPERTY"
+        }
+      ],
+      "filterBranchType": "AND",
+      "filterBranchOperator": "AND"
+    },
+    "unEnrollObjectsNotMeetingCriteria": false,
+    "reEnrollmentTriggersFilterBranches": [
+      {
+        "filterBranches": [],
+        "filters": [
+          {
+            "property": "hs_name",
+            "operation": {
+              "operator": "IS_EQUAL_TO",
+              "includeObjectsWithNoValueSet": false,
+              "value": "hs_last_email_date",
+              "operationType": "STRING"
+            },
+            "filterType": "PROPERTY"
+          },
+          {
+            "property": "hs_value",
+            "operation": {
+              "operator": "IS_KNOWN",
+              "includeObjectsWithNoValueSet": false,
+              "operationType": "ALL_PROPERTY"
+            },
+            "filterType": "PROPERTY"
+          }
+        ],
+        "filterBranchType": "AND",
+        "filterBranchOperator": "AND"
+      }
+    ],
+    "type": "LIST_BASED"
+  },
+  "timeWindows": [],
+  "blockedDates": [],
+  "customProperties": {},
+  "dataSources": [],
+  "crmObjectCreationStatus": "COMPLETE",
+  "type": "PLATFORM_FLOW"
+}

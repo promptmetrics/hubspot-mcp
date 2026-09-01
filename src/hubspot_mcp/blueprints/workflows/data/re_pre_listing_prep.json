@@ -1,0 +1,104 @@
+{
+  "format_version": 1,
+  "name": "re_pre_listing_prep",
+  "description": "Checklist of tasks fired when a seller deal reaches Pre-Listing.",
+  "tags": [
+    "real-estate",
+    "seller",
+    "checklist",
+    "deal"
+  ],
+  "source": {
+    "origin": "shipped"
+  },
+  "notes": [],
+  "flags": [],
+  "parameters": {},
+  "spec": {
+    "ui_path": "Settings > Automation > Workflows > Create workflow",
+    "object_type": "Deal-based",
+    "enrollment": {
+      "type": "PROPERTY_BASED",
+      "filter_branch": {
+        "filterBranchType": "OR",
+        "filterBranches": [
+          {
+            "filterBranchType": "AND",
+            "filters": [
+              {
+                "filterType": "PROPERTY",
+                "property": "dealstage",
+                "operation": {
+                  "operationType": "ENUMERATION",
+                  "operator": "IS_ANY_OF",
+                  "values": [
+                    "prelisting"
+                  ],
+                  "includeObjectsWithNoValueSet": false
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "actions": [
+      {
+        "step": 1,
+        "ui_action": "Set property value",
+        "fields": {
+          "Property": "listing_status",
+          "Value": "Off-Market - Pre-Listing"
+        }
+      },
+      {
+        "step": 2,
+        "ui_action": "Create task",
+        "fields": {
+          "Title": "Order professional photos",
+          "Due date": "{{timestamp + 3d}}",
+          "Assigned to": "{{deal.hubspot_owner_id}}",
+          "Priority": "Medium"
+        }
+      },
+      {
+        "step": 3,
+        "ui_action": "Create task",
+        "fields": {
+          "Title": "Schedule staging consultation",
+          "Due date": "{{timestamp + 5d}}",
+          "Assigned to": "{{deal.hubspot_owner_id}}",
+          "Priority": "Medium"
+        }
+      },
+      {
+        "step": 4,
+        "ui_action": "Create task",
+        "fields": {
+          "Title": "Complete CMA and pricing strategy",
+          "Due date": "{{timestamp + 7d}}",
+          "Assigned to": "{{deal.hubspot_owner_id}}",
+          "Priority": "Medium"
+        }
+      },
+      {
+        "step": 5,
+        "ui_action": "Create task",
+        "fields": {
+          "Title": "Confirm MLS entry date",
+          "Due date": "{{timestamp + 10d}}",
+          "Assigned to": "{{deal.hubspot_owner_id}}",
+          "Priority": "Medium"
+        }
+      }
+    ],
+    "prerequisites": [
+      "Deal property 'listing_status' exists on native listings object",
+      "Seller Pipeline has stage 'Pre-Listing'"
+    ],
+    "validation": [
+      "Move a test deal to Pre-Listing stage",
+      "Verify listing_status set and 4 tasks created"
+    ]
+  }
+}

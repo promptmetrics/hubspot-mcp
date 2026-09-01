@@ -1,0 +1,75 @@
+{
+  "format_version": 1,
+  "name": "re_offer_present_seller",
+  "description": "24-hour offer presentation task with escalation for Offers.",
+  "tags": [
+    "real-estate",
+    "offer",
+    "seller",
+    "escalation"
+  ],
+  "source": {
+    "origin": "shipped"
+  },
+  "notes": [],
+  "flags": [],
+  "parameters": {},
+  "spec": {
+    "ui_path": "Settings > Automation > Workflows > Create workflow",
+    "object_type": "Custom object (Offers)",
+    "enrollment": {
+      "type": "EVENT_BASED",
+      "trigger": "Offer record is created"
+    },
+    "actions": [
+      {
+        "step": 1,
+        "ui_action": "Create task",
+        "fields": {
+          "Title": "Present offer to seller",
+          "Due date": "{{timestamp + 1d}}",
+          "Assigned to": "{{offer.listing_agent}}",
+          "Priority": "High",
+          "Notes": "Schedule presentation of offer to seller within 24 hours."
+        }
+      },
+      {
+        "step": 2,
+        "ui_action": "Delay",
+        "fields": {
+          "Delay for": "24 hours"
+        }
+      },
+      {
+        "step": 3,
+        "ui_action": "If/then branch",
+        "fields": {
+          "Condition property": "offer_status",
+          "Operator": "is equal to any of",
+          "Value": "Pending Presentation"
+        },
+        "true_branch": [
+          {
+            "ui_action": "Create task",
+            "fields": {
+              "Title": "ESCALATE: Offer not presented within 24h",
+              "Due date": "{{timestamp + 2h}}",
+              "Assigned to": "Team lead",
+              "Priority": "High",
+              "Notes": "Offer status is still Pending Presentation after 24 hours. Escalate immediately."
+            }
+          }
+        ]
+      }
+    ],
+    "prerequisites": [
+      "Custom object 'Offers' is active",
+      "Property 'offer_status' exists on Offers"
+    ],
+    "validation": [
+      "Create a test Offer record",
+      "Verify task created due in 24h",
+      "Verify escalation fires after 24h if status unchanged"
+    ]
+  }
+}

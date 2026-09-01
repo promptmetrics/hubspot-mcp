@@ -3,8 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import hubspot_mcp.tools.workflows  # noqa: F401 — registers tools
-# hubspot_mcp.tools.blueprint_library is not ported yet (blueprint phase);
-# get_tool() returns None for its tools and the prompt builder skips them.
+import hubspot_mcp.tools.blueprint_library  # noqa: F401 — registers tools
 from hubspot_mcp.agents._base import AgentPrompt, build_agent_prompt
 from hubspot_mcp.blueprints.workflows import build_blueprint_context
 from hubspot_mcp.blueprints.workflows import list_blueprints, reload_blueprints

@@ -156,9 +156,27 @@ ACTION_TYPE_REGISTRY: dict[str, dict[str, Any]] = {
     },
 }
 
+# Reverse of ACTION_TYPE_REGISTRY: V4 actionTypeId -> UI action label.
+# Every shipped actionTypeId is unique, so this is a clean one-to-one inverse.
+# An actionTypeId absent here is unknown to the converter -> extractor keeps it
+# raw and records it in the learning log.
+INVERSE_ACTION_TYPES: dict[str, str] = {
+    v["actionTypeId"]: name for name, v in ACTION_TYPE_REGISTRY.items()
+}
+
 BRANCH_TYPES = {
     "If/then branch": "LIST_BRANCH",
 }
+
+# UI operator label -> V4 API operator. Shared between the forward converter
+# (``_build_branch_node``) and the inverse extractor so they stay in lockstep.
+OPERATOR_MAP: dict[str, str] = {
+    "is equal to any of": "IS_ANY_OF",
+    "is not equal to any of": "IS_NONE_OF",
+    "is known": "IS_KNOWN",
+    "is unknown": "IS_UNKNOWN",
+}
+INVERSE_OPERATOR_MAP: dict[str, str] = {v: k for k, v in OPERATOR_MAP.items()}
 
 # Mapping from blueprint enrollment trigger text to HubSpot eventTypeId.
 # These are Unified Events IDs from the V4 Flows API.
@@ -168,6 +186,16 @@ EVENT_TYPE_MAP: dict[str, str] = {
     "Showing record is created": "4-1463224",
 }
 
+# Many-to-one: several UI triggers map to the same eventTypeId. The inverse
+# picks a canonical trigger and attaches an ambiguity flag rather than guessing.
+INVERSE_EVENT_TYPE_MAP: dict[str, str] = {
+    "4-1463224": "Contact is created",
+}
+AMBIGUOUS_EVENT_TYPE_IDS: set[str] = {
+    v for v in EVENT_TYPE_MAP.values()
+    if sum(1 for _v in EVENT_TYPE_MAP.values() if _v == v) > 1
+}
+
 OBJECT_TYPE_MAP: dict[str, str] = {
     "Contact-based": "0-1",
     "Company-based": "0-2",
@@ -175,6 +203,11 @@ OBJECT_TYPE_MAP: dict[str, str] = {
     "Ticket-based": "0-5",
     "Listing-based": "0-420",
 }
+# Inverse of OBJECT_TYPE_MAP for the extractor. Custom-object IDs (``2-*``)
+# are intentionally NOT in this map — the extractor flags those as
+# portal-specific rather than trusting ``CUSTOM_OBJECT_MAP``, which holds IDs
+# valid only in portal 148408595.
+INVERSE_OBJECT_TYPE_IDS: dict[str, str] = {v: k for k, v in OBJECT_TYPE_MAP.items()}
 
 CUSTOM_OBJECT_MAP: dict[str, str] = {
     "Showings": "2-202484491",
@@ -182,6 +215,13 @@ CUSTOM_OBJECT_MAP: dict[str, str] = {
     "Open Houses": "2-202481647",
     "Commissions": "2-202481648",
 }
+# Inverse of CUSTOM_OBJECT_MAP for the extractor. These IDs are valid only in
+# portal 148408595 (the reverse-engineering source), so the extractor still
+# FLAGS every ``2-*`` objectTypeId as portal-specific even when it can invert
+# the name — the flag is the honest warning, the inversion keeps round-trip
+# working for the shipped blueprints. A ``2-*`` ID not in this map is an
+# unknown custom object and is kept verbatim in the object_type string.
+INVERSE_CUSTOM_OBJECT_MAP: dict[str, str] = {v: k for k, v in CUSTOM_OBJECT_MAP.items()}
 
 
 def resolve_object_type_id(object_type: str) -> str:

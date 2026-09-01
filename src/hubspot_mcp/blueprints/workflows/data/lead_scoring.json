@@ -1,0 +1,98 @@
+{
+  "format_version": 1,
+  "name": "lead_scoring",
+  "description": "Increment a score property when a contact engages, and optionally promote lifecycle stage when a threshold is reached.",
+  "tags": [
+    "scoring",
+    "contact",
+    "automation"
+  ],
+  "source": {
+    "origin": "shipped"
+  },
+  "notes": [],
+  "flags": [],
+  "parameters": {
+    "name": {
+      "type": "string",
+      "default": "Lead Scoring",
+      "description": "Workflow name"
+    },
+    "score_property": {
+      "type": "string",
+      "default": "hubspotscore",
+      "description": "Contact property to increment"
+    },
+    "increment": {
+      "type": "integer",
+      "default": 10,
+      "description": "Points to add per engagement"
+    },
+    "threshold": {
+      "type": "integer",
+      "default": 50,
+      "description": "Score threshold to promote lifecycle stage (0 to disable)"
+    }
+  },
+  "spec": {
+    "ui_path": "Settings > Automation > Workflows > Create workflow",
+    "object_type": "Contact-based",
+    "enrollment": {
+      "type": "PROPERTY_BASED",
+      "filter_branch": {
+        "filterBranchType": "OR",
+        "filterBranches": [
+          {
+            "filterBranchType": "AND",
+            "filters": [
+              {
+                "filterType": "PROPERTY",
+                "property": "{{param:score_property}}",
+                "operation": {
+                  "operationType": "ALL_PROPERTY",
+                  "operator": "IS_KNOWN",
+                  "includeObjectsWithNoValueSet": false
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "actions": [
+      {
+        "step": 1,
+        "ui_action": "Set property value",
+        "fields": {
+          "Property": "{{param:score_property}}",
+          "Value": "{{param:increment}}"
+        }
+      },
+      {
+        "step": 2,
+        "ui_action": "If/then branch",
+        "fields": {
+          "Condition property": "{{param:score_property}}",
+          "Operator": "is greater than",
+          "Value": "{{param:threshold}}"
+        },
+        "true_branch": [
+          {
+            "ui_action": "Set property value",
+            "fields": {
+              "Property": "lifecyclestage",
+              "Value": "marketingqualifiedlead"
+            }
+          }
+        ],
+        "include_if": "threshold"
+      }
+    ],
+    "prerequisites": [],
+    "validation": [
+      "Create a test contact",
+      "Verify score property is set",
+      "Verify lifecycle stage promoted when threshold exceeded"
+    ]
+  }
+}

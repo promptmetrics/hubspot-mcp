@@ -1,0 +1,112 @@
+{
+  "format_version": 1,
+  "name": "re_speed_to_lead",
+  "description": "Speed-to-lead workflow: creates a 5-minute task and escalation for new leads.",
+  "tags": [
+    "real-estate",
+    "lead-routing",
+    "contact",
+    "task"
+  ],
+  "source": {
+    "origin": "shipped"
+  },
+  "notes": [],
+  "flags": [],
+  "parameters": {
+    "name": {
+      "type": "string",
+      "default": "[RE] Lead Routing — Speed to Lead",
+      "description": "Workflow display name"
+    }
+  },
+  "spec": {
+    "ui_path": "Settings > Automation > Workflows > Create workflow",
+    "object_type": "Contact-based",
+    "enrollment": {
+      "type": "EVENT_BASED",
+      "trigger": "Contact is created",
+      "filter_branch": {
+        "filterBranchType": "OR",
+        "filterBranches": [
+          {
+            "filterBranchType": "AND",
+            "filters": [
+              {
+                "filterType": "PROPERTY",
+                "property": "lifecyclestage",
+                "operation": {
+                  "operationType": "ENUMERATION",
+                  "operator": "IS_ANY_OF",
+                  "values": [
+                    "lead"
+                  ],
+                  "includeObjectsWithNoValueSet": false
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "actions": [
+      {
+        "step": 1,
+        "ui_action": "Create task",
+        "fields": {
+          "Title": "Speed-to-lead: Contact new lead within 5 minutes",
+          "Due date": "{{timestamp + 5m}}",
+          "Assigned to": "{{contact.hubspot_owner_id}}",
+          "Priority": "High",
+          "Notes": "New lead captured. First contact must happen within 5 minutes for optimal conversion."
+        }
+      },
+      {
+        "step": 2,
+        "ui_action": "Send internal email notification",
+        "fields": {
+          "Send to": "{{contact.hubspot_owner_id}}",
+          "Subject": "New lead assigned: {{contact.firstname}} {{contact.lastname}}",
+          "Body": "A new lead has been assigned to you. Contact them within 5 minutes for best conversion rates."
+        }
+      },
+      {
+        "step": 3,
+        "ui_action": "Delay",
+        "fields": {
+          "Delay for": "30 minutes"
+        }
+      },
+      {
+        "step": 4,
+        "ui_action": "If/then branch",
+        "fields": {
+          "Condition property": "lifecyclestage",
+          "Operator": "is equal to any of",
+          "Value": "lead"
+        },
+        "true_branch": [
+          {
+            "ui_action": "Create task",
+            "fields": {
+              "Title": "ESCALATE: Lead not contacted within 30 min",
+              "Due date": "{{timestamp + 15m}}",
+              "Assigned to": "Team lead (set manually)",
+              "Priority": "High",
+              "Notes": "First-contact task was not completed within 30 minutes. Escalate immediately."
+            }
+          }
+        ]
+      }
+    ],
+    "prerequisites": [
+      "Contact property 'lifecyclestage' is active and contains value 'lead'",
+      "At least one contact owner (hubspot_owner_id) is assigned to contacts"
+    ],
+    "validation": [
+      "Create a test contact with lifecyclestage = lead",
+      "Verify task appears within 5 minutes",
+      "Verify escalation task fires after 30 min if first task not completed"
+    ]
+  }
+}
