@@ -1,0 +1,207 @@
+# Routing accuracy corpus
+# Each entry: request text -> expected route(s)
+# `mode: fast_path` entries are gated by tests/test_routing_corpus_gate.py against
+# the live keyword router `route_request`. expected_routes are the CORRECT
+# agent(s) for the request — the gate is an accuracy assert, not a "lock current
+# output" baseline. Every specialist in _AGENT_REGISTRY should have at least one
+# fast_path entry (enforced by the coverage check in test_routing_corpus_gate.py).
+# `mode: llm` entries are aspirational targets for the (stub) LLM router and are
+# skipped by the gate; the LLM router is not yet live.
+
+- request: "find all contacts"
+  expected_routes: ["objects"]
+  mode: fast_path
+
+- request: "create a new company"
+  expected_routes: ["objects"]
+  mode: fast_path
+
+- request: "update deal properties"
+  expected_routes: ["objects", "properties"]
+  mode: fast_path
+
+- request: "list workflows"
+  expected_routes: ["lists", "workflows"]
+  mode: fast_path
+
+- request: "add contacts to a list"
+  expected_routes: ["lists", "objects"]
+  mode: fast_path
+
+- request: "create a workflow to send welcome emails"
+  expected_routes: ["engagements", "workflows"]
+  mode: fast_path
+
+- request: "log a call with a contact"
+  expected_routes: ["engagements", "objects"]
+  mode: fast_path
+
+- request: "get pipeline stages for deals"
+  expected_routes: ["pipelines"]
+  mode: fast_path
+
+- request: "how many contacts were created last week"
+  expected_routes: ["objects"]
+  mode: fast_path
+
+- request: "clean up duplicate contacts"
+  expected_routes: ["hygiene"]
+  mode: fast_path
+
+- request: "associate a deal with a company"
+  expected_routes: ["associations", "objects"]
+  mode: fast_path
+
+- request: "create a custom property on contacts"
+  expected_routes: ["properties"]
+  mode: fast_path
+
+- request: "show me the analytics for email opens"
+  expected_routes: ["analytics", "engagements"]
+  mode: fast_path
+
+- request: "create a list of contacts who haven't engaged in 30 days"
+  expected_routes: ["lists", "objects"]
+  mode: fast_path
+
+- request: "remove from list"
+  expected_routes: ["lists"]
+  mode: fast_path
+
+# Newly-covered specialists (R1 full-registry routing)
+- request: "create a quote for the Acme Corp deal"
+  expected_routes: ["objects", "quotes"]
+  mode: fast_path
+
+- request: "create an invoice for an order"
+  expected_routes: ["invoices", "orders"]
+  mode: fast_path
+
+- request: "enroll a contact in a sequence"
+  expected_routes: ["objects", "sequences"]
+  mode: fast_path
+
+- request: "set up a meeting link"
+  expected_routes: ["engagements", "scheduler"]
+  mode: fast_path
+
+- request: "create a recurring subscription"
+  expected_routes: ["subscriptions"]
+  mode: fast_path
+
+- request: "add a discount code"
+  expected_routes: ["discounts"]
+  mode: fast_path
+
+- request: "start a data sync"
+  expected_routes: ["data"]
+  mode: fast_path
+
+- request: "create a form with fields"
+  expected_routes: ["forms"]
+  mode: fast_path
+
+- request: "view the forecast for next quarter"
+  expected_routes: ["forecasts"]
+  mode: fast_path
+
+- request: "assign a goal target to the team"
+  expected_routes: ["goals"]
+  mode: fast_path
+
+- request: "check the audit log"
+  expected_routes: ["audit_logs"]
+  mode: fast_path
+
+- request: "set up a tax rate"
+  expected_routes: ["taxes"]
+  mode: fast_path
+
+- request: "create a project"
+  expected_routes: ["projects"]
+  mode: fast_path
+
+- request: "send a whatsapp message"
+  expected_routes: ["communications"]
+  mode: fast_path
+
+- request: "score the leads"
+  expected_routes: ["leads"]
+  mode: fast_path
+
+- request: "view account info"
+  expected_routes: ["account_info"]
+  mode: fast_path
+
+- request: "create a timeline event"
+  expected_routes: ["timeline_events"]
+  mode: fast_path
+
+- request: "publish a kb article"
+  expected_routes: ["service"]
+  mode: fast_path
+
+- request: "create a payment for checkout"
+  expected_routes: ["commerce"]
+  mode: fast_path
+
+- request: "onboard a new user"
+  expected_routes: ["users"]
+  mode: fast_path
+
+- request: "create a custom object"
+  expected_routes: ["custom_objects"]
+  mode: fast_path
+
+- request: "use raw api for custom endpoint"
+  expected_routes: ["raw_api"]
+  mode: fast_path
+
+- request: "view the shopping cart"
+  expected_routes: ["carts"]
+  mode: fast_path
+
+- request: "create a deal split"
+  expected_routes: ["deal_splits", "objects"]
+  mode: fast_path
+
+- request: "add a fee"
+  expected_routes: ["fees"]
+  mode: fast_path
+
+- request: "schedule an appointment"
+  expected_routes: ["appointments"]
+  mode: fast_path
+
+- request: "create a training course"
+  expected_routes: ["courses"]
+  mode: fast_path
+
+- request: "create a listing"
+  expected_routes: ["listings"]
+  mode: fast_path
+
+- request: "add a service product"
+  expected_routes: ["services"]
+  mode: fast_path
+
+- request: "browse the object library"
+  expected_routes: ["object_library"]
+  mode: fast_path
+
+- request: "view the security history"
+  expected_routes: ["security_history"]
+  mode: fast_path
+
+- request: "track email events"
+  expected_routes: ["email_events", "engagements"]
+  mode: fast_path
+
+# Edge cases
+- request: ""
+  expected_routes: []
+  mode: fast_path
+
+- request: "hello"
+  expected_routes: []
+  mode: fast_path

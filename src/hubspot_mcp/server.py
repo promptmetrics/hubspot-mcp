@@ -138,6 +138,7 @@ mcp = MCPServer(
     lifespan=app_lifespan,
     cache_hints={
         "tools/list": CacheHint(ttl_ms=300_000, scope="private"),
+        "prompts/list": CacheHint(ttl_ms=300_000, scope="private"),
         "server/discover": CacheHint(ttl_ms=300_000, scope="private"),
     },
 )
@@ -565,6 +566,52 @@ def _tool_blocked(tool_name: str, matrix) -> bool:
     return bool(missing_capabilities_for_tool(tool_name, matrix))
 
 
+async def hubspot_route(ctx: Context, request_text: str) -> Any:
+    """Route a natural-language HubSpot request to the specialist charter(s) that handle it.
+
+    Returns the matching agent key(s) plus the prompt name and tool list for
+    each, so a client can fetch the charter via ``prompts/get`` and know which
+    tools it may use. This is the server-side half of the routing decision --
+    upstream exposes it as a ``hubspot route`` CLI subcommand; the frozen
+    ``{agents, rationale}`` contract is preserved so the shared routing corpus
+    gates both.
+    """
+    lf = await _safety_ctx(ctx)
+    from hubspot_mcp.agent_routing import route_request
+
+    if not request_text:
+        return {"agents": [], "rationale": "empty request; no agents routed", "charters": []}
+
+    agents = route_request(request_text, portal_id=lf.get("portal_id"))
+    if not agents:
+        rationale = "no keyword match; no agents routed"
+    elif len(agents) == 1:
+        rationale = f"keyword routing selected agent: {agents[0]}"
+    else:
+        rationale = (
+            f"keyword routing selected {len(agents)} agents as sorted candidates: "
+            + ", ".join(agents)
+        )
+
+    from hubspot_mcp.agents import _AGENT_REGISTRY
+
+    charters = []
+    for key in agents:
+        builder = _AGENT_REGISTRY.get(key)
+        if builder is None:
+            continue
+        built = builder(lf.get("portal_config"))
+        charters.append(
+            {
+                "agent": key,
+                "prompt": f"hubspot_{key}",
+                "domain": built.domain_description,
+                "tools": built.tool_names,
+            }
+        )
+    return {"agents": agents, "rationale": rationale, "charters": charters}
+
+
 def _safety_tool_registrations() -> list[tuple[str, Any, str]]:
     return [
         (fn.__name__, fn, (fn.__doc__ or "").strip().split("\n")[0])
@@ -575,8 +622,63 @@ def _safety_tool_registrations() -> list[tuple[str, Any, str]]:
             hubspot_list_recent_audit,
             hubspot_undo_write,
             hubspot_status,
+            hubspot_route,
         )
     ]
+
+
+
+# --- Agent charters as MCP prompts -------------------------------------------
+#
+# hubspot-claude ships 44 "agents" that are prompt BUILDERS, not orchestration:
+# each returns an AgentPrompt(agent_name, system_prompt, tool_names,
+# domain_description) assembled from shared blocks plus a per-domain tool list.
+# That is an MCP prompt almost exactly, which resolves Task 10 of the Phase 1
+# build plan without converting anything to Claude Code sub-agent markdown --
+# and it works for every MCP client, not just Claude Code.
+#
+# Charters are portal-sensitive: _build_domain appends the portal's custom
+# object types from SchemaCache, so prompts/list is cacheScope "private" for the
+# same reason tools/list is.
+
+
+def _make_agent_prompt(agent_key: str):
+    """Build the prompt handler for one agent charter."""
+
+    async def charter(ctx: Context) -> str:
+        from hubspot_mcp.agents import _AGENT_REGISTRY
+
+        lf = _lifespan(ctx)
+        if lf.get("auth_error"):
+            raise ToolError(lf["auth_error"])
+        builder = _AGENT_REGISTRY[agent_key]
+        # The builder takes the portal so it can name custom object types; it
+        # tolerates None, which is what an unauthenticated portal yields.
+        return builder(lf.get("portal_config")).system_prompt
+
+    charter.__name__ = f"hubspot_{agent_key}"
+    charter.__annotations__ = {"ctx": Context, "return": str}
+    return charter
+
+
+def _register_agent_prompts() -> None:
+    from hubspot_mcp.agents import _AGENT_REGISTRY
+    from mcp.server.mcpserver.prompts import Prompt
+
+    for agent_key in sorted(_AGENT_REGISTRY):
+        fn = _make_agent_prompt(agent_key)
+        description = (
+            f"Operating charter for the {agent_key.replace('_', ' ')} domain: "
+            "scope, its HubSpot tools, self-correction and write-verification rules."
+        )
+        mcp.add_prompt(
+            Prompt.from_function(
+                fn,
+                name=f"hubspot_{agent_key}",
+                description=description,
+                context_kwarg="ctx",
+            )
+        )
 
 
 def _register_all_tools() -> None:
@@ -595,6 +697,7 @@ def _register_all_tools() -> None:
 
 
 _register_all_tools()
+_register_agent_prompts()
 
 
 def run(transport: str = "stdio", *, host: str | None = None, port: int | None = None) -> None:
