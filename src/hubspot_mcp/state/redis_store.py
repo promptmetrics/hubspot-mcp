@@ -36,6 +36,12 @@ from hubspot_mcp.redaction import redact_dict_for_disk
 from hubspot_mcp.snapshot import build_undo_snapshot
 from hubspot_mcp.state.base import StateStore
 from hubspot_mcp.state.cache_store import CacheStore
+from hubspot_mcp.state.connection_store import (
+    ConnectionStore,
+    ConnectionUnreadable,
+    HubSpotConnection,
+    subject_key,
+)
 
 # `redis` and `cryptography` are the `[redis]` extra, not core dependencies.
 # Nothing imports this module unless the Redis backend is selected, so the
@@ -80,20 +86,33 @@ def _fernet(key: str | None = None) -> Fernet:
         ) from exc
 
 
-class RedisStateStore(StateStore):
-    """Portal-keyed state store over any Redis-protocol server."""
+class _EncryptedRedis:
+    """Shared Redis connection and cipher for the three Redis-backed stores.
+
+    Encryption is common to all of them; *decryption* is not, because the right
+    response to an unreadable value differs — a cache or a pending preview reads
+    as a miss, a connection must say it cannot be read. Each store owns that
+    decision.
+    """
 
     def __init__(self, client: Redis, *, encryption_key: str | None = None) -> None:
         self._redis = client
         self._cipher = _fernet(encryption_key)
 
     @classmethod
-    def from_url(cls, url: str | None = None, **kwargs: Any) -> RedisStateStore:
+    def from_url(cls, url: str | None = None, **kwargs: Any):
         resolved = url or os.environ.get(URL_ENV, "")
         if not resolved:
-            raise RuntimeError(f"{URL_ENV} is not set; cannot build a RedisStateStore.")
+            raise RuntimeError(f"{URL_ENV} is not set; cannot build a {cls.__name__}.")
         # decode_responses stays False: every value is a Fernet token, i.e. bytes.
         return cls(Redis.from_url(resolved, decode_responses=False), **kwargs)
+
+    def _encode(self, payload: dict[str, Any]) -> bytes:
+        return self._cipher.encrypt(json.dumps(payload).encode())
+
+
+class RedisStateStore(_EncryptedRedis, StateStore):
+    """Portal-keyed state store over any Redis-protocol server."""
 
     # --- keys and codec ---------------------------------------------------
 
@@ -108,9 +127,6 @@ class RedisStateStore(StateStore):
 
     def _audit_key(self, portal_id: str) -> str:
         return f"{_NAMESPACE}:{portal_id}:audit"
-
-    def _encode(self, payload: dict[str, Any]) -> bytes:
-        return self._cipher.encrypt(json.dumps(payload).encode())
 
     def _decode(self, raw: bytes | str | None) -> dict[str, Any] | None:
         # redis-py types its return as `bytes | str` because `decode_responses`
@@ -295,7 +311,7 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-class RedisCacheStore(CacheStore):
+class RedisCacheStore(_EncryptedRedis, CacheStore):
     """Redis-backed :class:`CacheStore`.
 
     Shares the Redis connection model and encryption of :class:`RedisStateStore`
@@ -304,17 +320,6 @@ class RedisCacheStore(CacheStore):
     and a write must be dropped with a note on stderr. Raising here would turn a
     Redis blip into failed tool calls that had a perfectly good fallback.
     """
-
-    def __init__(self, client: Redis, *, encryption_key: str | None = None) -> None:
-        self._redis = client
-        self._cipher = _fernet(encryption_key)
-
-    @classmethod
-    def from_url(cls, url: str | None = None, **kwargs: Any) -> RedisCacheStore:
-        resolved = url or os.environ.get(URL_ENV, "")
-        if not resolved:
-            raise RuntimeError(f"{URL_ENV} is not set; cannot build a RedisCacheStore.")
-        return cls(Redis.from_url(resolved, decode_responses=False), **kwargs)
 
     def _key(self, scope: str | None, name: str) -> str:
         return f"{_NAMESPACE}:cache:{scope or '_global'}:{name}"
@@ -348,3 +353,47 @@ class RedisCacheStore(CacheStore):
             await self._redis.delete(self._key(scope, name))
         except RedisError as exc:
             print(f"hubspot_mcp: cache delete failed for {name}: {exc}", file=sys.stderr)
+
+
+class RedisConnectionStore(_EncryptedRedis, ConnectionStore):
+    """Redis-backed :class:`ConnectionStore`.
+
+    Encrypted like :class:`RedisStateStore`, and for a sharper reason: a HubSpot
+    refresh token is a long-lived credential to someone else's CRM, sitting in a
+    third party's database.
+
+    Error handling follows `RedisStateStore`, not `RedisCacheStore`: failures
+    surface. A connection cannot be rebuilt by refetching, so swallowing a read
+    error would tell a user to reconnect an account they already have — and, if
+    it happened on the write path, would silently discard the connection they
+    just made.
+
+    No TTL. A connection lasts until the user disconnects or HubSpot revokes it.
+    """
+
+    def _key(self, subject: str) -> str:
+        return f"{_NAMESPACE}:connection:{subject_key(subject)}"
+
+    async def get(self, subject: str) -> HubSpotConnection | None:
+        raw = await self._redis.get(self._key(subject))
+        if raw is None:
+            return None
+        try:
+            data = json.loads(self._cipher.decrypt(raw))
+        except (InvalidToken, ValueError) as exc:
+            # A rotated key here is not "not connected" — it is a connection we
+            # can no longer read. Say so, rather than sending the user round the
+            # OAuth flow to fix a key-management problem.
+            raise ConnectionUnreadable(
+                "this user's HubSpot connection could not be decrypted; "
+                f"{KEY_ENV} may have been rotated"
+            ) from exc
+        return HubSpotConnection.from_dict(data)
+
+    async def put(self, connection: HubSpotConnection) -> None:
+        await self._redis.set(
+            self._key(connection.subject), self._encode(connection.to_dict())
+        )
+
+    async def delete(self, subject: str) -> None:
+        await self._redis.delete(self._key(subject))
