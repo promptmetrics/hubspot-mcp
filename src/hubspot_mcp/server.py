@@ -477,17 +477,17 @@ async def hubspot_reject_write(ctx: Context, action_id: str) -> Any:
 async def hubspot_list_pending_writes(ctx: Context) -> Any:
     """List pending (not-yet-approved) write previews for the active portal."""
     lf = await _safety_ctx(ctx)
-    from hubspot_mcp.persistence import list_pending
+    from hubspot_mcp.state import get_store
 
-    return {"pending": list_pending(lf["portal_id"])}
+    return {"pending": get_store().list_pending(lf["portal_id"])}
 
 
 async def hubspot_list_recent_audit(ctx: Context, limit: int = 20) -> Any:
     """List recent audit-log entries for the active portal."""
     lf = await _safety_ctx(ctx)
-    from hubspot_mcp import audit
+    from hubspot_mcp.state import get_store
 
-    return {"audit": audit.get_recent_audits(lf["portal_id"], limit=limit)}
+    return {"audit": get_store().get_recent_audits(lf["portal_id"], limit=limit)}
 
 
 async def hubspot_undo_write(ctx: Context, action_id: str) -> Any:
@@ -501,13 +501,12 @@ async def hubspot_undo_write(ctx: Context, action_id: str) -> Any:
     deletes/merges are refused outright.
     """
     lf = await _safety_ctx(ctx)
-    from hubspot_mcp import audit
     from hubspot_mcp.handlers import undo_action
-    from hubspot_mcp.snapshot import delete_undo_snapshot, load_undo_snapshot, snapshot_dir_for_portal
+    from hubspot_mcp.state import get_store
 
     portal_id = lf["portal_id"]
-    snap_dir = snapshot_dir_for_portal(portal_id)
-    snapshot = load_undo_snapshot(snap_dir, action_id)
+    store = get_store()
+    snapshot = store.load_undo_snapshot(portal_id, action_id)
     if snapshot is None:
         raise ToolError(f"No undo snapshot for action {action_id}.")
 
@@ -520,9 +519,9 @@ async def hubspot_undo_write(ctx: Context, action_id: str) -> Any:
         # undo that did not happen.
         raise ToolError(message)
 
-    delete_undo_snapshot(snap_dir, action_id)
+    store.delete_undo_snapshot(portal_id, action_id)
     try:
-        audit.log_write(
+        store.log_write(
             portal_id=portal_id,
             action=f"undo:{action_id}",
             agent=(snapshot.get("metadata") or {}).get("intent_type") or "unknown",

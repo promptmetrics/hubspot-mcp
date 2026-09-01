@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Phase 2 — Task 1: the `StateStore` seam
+
+Groundwork for serving over HTTPS. No user-facing behaviour change on stdio.
+
+- **Routed all persistence through `StateStore`.** `handlers`, `safety` and
+  `server` called the `persistence` / `snapshot` / `audit` modules directly, so
+  the `RedisStateStore` planned in `docs/architecture.md` §4 would not have been
+  a drop-in — it had ~28 call sites to convert first. They now resolve the store
+  through `hubspot_mcp.state.get_store()`, and `set_store()` installs a
+  different implementation. `FileStateStore` remains the default.
+- **Added `StateStore.save_undo_snapshot`.** The pattern-write executor captures
+  its own originals (it only learns which records applied after the batch runs)
+  and had no interface method to write them — an omission invisible while
+  nothing called the interface.
+- **`hubspot_list_pending_writes` now returns action ids, not file paths.** A
+  path cannot be honoured by a remote store, and the previous shape leaked the
+  server's home directory into the tool result. Action ids are also what
+  `hubspot_approve_write` / `hubspot_reject_write` actually take.
+
 ## 0.2.0 — 2026-09-01
 
 Protocol migration and parity with `promptmetrics/hubspot-claude` v0.2.14.

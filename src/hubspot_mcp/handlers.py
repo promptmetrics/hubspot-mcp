@@ -19,14 +19,10 @@ import sys
 from dataclasses import dataclass
 from typing import Any
 
-from hubspot_mcp import audit
 from hubspot_mcp.cache import SchemaCache, ensure_custom_schema_cached, warm_standard_schemas
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.models import BatchApprovalMode, RiskLevel, TaskIntent
-from hubspot_mcp.persistence import clear as _clear_pending
-from hubspot_mcp.persistence import confirm as _confirm_pending
-from hubspot_mcp.persistence import load as _load_pending
 from hubspot_mcp.policy import AUTO, FULL_GATE
 from hubspot_mcp.safety import apply_write
 from hubspot_mcp.scope_registry import (
@@ -34,13 +30,7 @@ from hubspot_mcp.scope_registry import (
     WRITE_TOOLS,
     get_required_scopes,
 )
-from hubspot_mcp.snapshot import (
-    delete_undo_snapshot,
-    save_undo_snapshot,
-    save_undo_snapshot_for_action,
-    snapshot_dir_for_portal,
-    update_undo_snapshot,
-)
+from hubspot_mcp.state import get_store
 from hubspot_mcp.tools import invoke_tool
 from hubspot_mcp.validation import filter_writable_properties
 
@@ -534,7 +524,7 @@ async def execute_pending_write(
     since nothing was changed to undo.
     """
     portal_id = portal_config.portal_id
-    preview_data = _load_pending(portal_id, action_id)
+    preview_data = get_store().load_pending(portal_id, action_id)
     if preview_data is None:
         raise ExecuteError("not_found", f"No pending preview found with ID {action_id}.")
 
@@ -563,7 +553,7 @@ async def execute_pending_write(
                     retryable=False,
                     guidance=f"Re-run as `approve {action_id} {required}` — the count must equal the impact ({required}).",
                 )
-        elif not await asyncio.to_thread(_confirm_pending, portal_id, action_id, confirm_count):
+        elif not await asyncio.to_thread(get_store().confirm_pending, portal_id, action_id, confirm_count):
             raise ExecuteError(
                 "validation",
                 f"Wrong confirmation count: {confirm_count} (impact is {required}).",
@@ -590,7 +580,7 @@ async def execute_pending_write(
     # written yet, so no cleanup is needed on this path.
     if intent_type in ("create", "update", "delete"):
         try:
-            save_undo_snapshot_for_action(portal_id, action_id, preview_data)
+            get_store().save_undo_snapshot_for_action(portal_id, action_id, preview_data)
         except Exception as exc:
             raise ExecuteError(
                 "snapshot",
@@ -599,7 +589,6 @@ async def execute_pending_write(
             ) from exc
         snap_saved = True
 
-    snap_dir = snapshot_dir_for_portal(portal_id)
     data: dict[str, Any] = {}
     created_ids: list[str] = []
     try:
@@ -640,7 +629,7 @@ async def execute_pending_write(
         # so it cannot mask the original ExecuteError if it itself raises.
         if snap_saved:
             try:
-                delete_undo_snapshot(snap_dir, action_id)
+                get_store().delete_undo_snapshot(portal_id, action_id)
             except Exception as del_exc:
                 print(f"hubspot_mcp: snapshot delete failed: {del_exc}", file=sys.stderr)
         raise
@@ -651,7 +640,7 @@ async def execute_pending_write(
         # ExecuteError.  Pending is NOT cleared — the caller can retry.
         if snap_saved:
             try:
-                delete_undo_snapshot(snap_dir, action_id)
+                get_store().delete_undo_snapshot(portal_id, action_id)
             except Exception as del_exc:
                 print(f"hubspot_mcp: snapshot delete failed: {del_exc}", file=sys.stderr)
         raise ExecuteError("server", str(exc), retryable=True) from exc
@@ -674,8 +663,8 @@ async def execute_pending_write(
                 # metadata is stale.  The snapshot file itself remains so undo
                 # is still attemptable for the original_values half.
                 try:
-                    update_undo_snapshot(
-                        snap_dir,
+                    get_store().update_undo_snapshot(
+                        portal_id,
                         action_id,
                         metadata={"created_ids": [str(created_id)]},
                     )
@@ -707,10 +696,10 @@ async def execute_pending_write(
                     file=sys.stderr,
                 )
 
-    _clear_pending(portal_id, action_id)
+    get_store().clear_pending(portal_id, action_id)
     audit_failed = False
     try:
-        audit.log_write(
+        get_store().log_write(
             portal_id=portal_id,
             action=f"approve:{action_id}",
             agent=preview_data.get("agent_name") or preview_data.get("tool_name") or "tool",
@@ -722,7 +711,7 @@ async def execute_pending_write(
         # so a failure here cannot be rolled back.  Log to stderr as the
         # minimum FR-17 fallback and surface via audit_failed so the caller
         # can retry the audit without re-running the write.
-        print(f"hubspot_mcp: audit.log_write failed: {audit_exc}", file=sys.stderr)
+        print(f"hubspot_mcp: audit log_write failed: {audit_exc}", file=sys.stderr)
         audit_failed = True
     return ExecuteResult(
         status="success",
@@ -766,11 +755,11 @@ async def handle_reject(client, cache, portal_config: PortalConfig, params: dict
     if not action_id:
         raise HandlerError("validation", "Missing 'action_id' in params.")
     portal_id = portal_config.portal_id
-    preview_data = _load_pending(portal_id, action_id)
+    preview_data = get_store().load_pending(portal_id, action_id)
     if preview_data is None:
         raise HandlerError("not_found", f"No pending preview found with ID {action_id}.")
     who = preview_data.get("agent_name") or preview_data.get("tool_name") or "tool"
-    _clear_pending(portal_id, action_id)
+    get_store().clear_pending(portal_id, action_id)
     return _ok({"rejected": action_id, "for": who})
 
 
@@ -879,14 +868,13 @@ async def _execute_pattern_write(
             except Exception as close_exc:  # noqa: BLE001 — never mask a write result
                 print(f"hubspot_mcp: client.close() failed: {close_exc}", file=sys.stderr)
 
-    snap_dir = snapshot_dir_for_portal(portal_id)
     # (4) One batch undo snapshot holding a per-record entry for each APPLIED
     # record only (drifted/failed excluded), so `hubspot undo <id>` restores
     # exactly the set that changed via the shared update-undo path.
     if applied_originals:
         try:
-            save_undo_snapshot(
-                snap_dir,
+            get_store().save_undo_snapshot(
+                portal_id,
                 action_id,
                 applied_originals,
                 metadata={"intent_type": "update", "target_object": object_type, "undoable": True},
@@ -894,13 +882,13 @@ async def _execute_pattern_write(
         except Exception as snap_exc:  # noqa: BLE001 — write already committed
             print(f"hubspot_mcp: pattern batch snapshot failed: {snap_exc}", file=sys.stderr)
 
-    await asyncio.to_thread(_clear_pending, portal_id, action_id)
+    await asyncio.to_thread(get_store().clear_pending, portal_id, action_id)
 
     # (5) Per-record audit entry for each applied record (FR-17; own audit entry).
     audit_failed = False
     for rid in applied:
         try:
-            audit.log_write(
+            get_store().log_write(
                 portal_id=portal_id,
                 action=f"approve:{action_id}:{rid}",
                 agent=tool_name,
@@ -913,7 +901,7 @@ async def _execute_pattern_write(
                 informing_sources=preview_data.get("informing_sources"),
             )
         except Exception as audit_exc:  # noqa: BLE001 — FR-17 fallback
-            print(f"hubspot_mcp: pattern audit.log_write failed for {rid}: {audit_exc}", file=sys.stderr)
+            print(f"hubspot_mcp: pattern audit log_write failed for {rid}: {audit_exc}", file=sys.stderr)
             audit_failed = True
 
     report = {

@@ -87,7 +87,7 @@ per-request `tools/list` filter.
 
 | # | Task | Depends on | Est. |
 |---|---|---|---|
-| 1 | **Route persistence through `StateStore`.** Introduce a module-level `get_store()` returning the configured implementation; convert the ~28 direct call sites in `handlers.py`, `snapshot.py`, `safety.py`, `server.py`. Behaviour-identical — `FileStateStore` stays the default and the 628 tests must pass untouched. | — | 0.75d |
+| 1 | ✅ **Done.** **Route persistence through `StateStore`.** Introduce a module-level `get_store()` returning the configured implementation; convert the ~28 direct call sites in `handlers.py`, `snapshot.py`, `safety.py`, `server.py`. Behaviour-identical — `FileStateStore` stays the default and the 628 tests must pass untouched. | — | 0.75d |
 | 2 | **`RedisStateStore`.** Implement all 11 methods against Upstash (or Vercel's Redis integration). Pending previews and snapshots are Fernet-encrypted blobs keyed by `portal_id:action_id`; audit is an append-only list. Port `FileStateStore`'s tests against it via a shared conformance suite so both implementations are held to one contract. | 1 | 0.75d |
 | 3 | **Per-request bearer auth.** `SERVER_SECRET` from env, constant-time compare, wired through the SDK's `token_verifier` rather than middleware — there is no handshake to authenticate in. `auth/bearer_middleware.py` already documents this; replace the stub. | — | 0.25d |
 | 4 | **Move the remaining local-disk state.** Schema cache, capability cache and docs index are per-instance today; on Vercel each cold instance rebuilds them (the docs index costs ~40 fetches). Move to Redis with the same TTLs. | 1, 2 | 0.35d |
@@ -98,6 +98,27 @@ per-request `tools/list` filter.
 **Estimated: ~2.85 dev-days**, against the spec's ~2–3. The estimate holds only
 because Task 1 is bounded mechanical work; if the call sites resist a clean
 `get_store()` seam, it grows.
+
+### Task 1 outcome
+
+Landed as expected — `get_store()` / `set_store()` in `hubspot_mcp.state`, all
+28 call sites converted, the 628 existing tests unchanged and green. Two things
+the interface got wrong showed up only once something called it, and both are
+now fixed:
+
+- **`save_undo_snapshot` was missing.** The pattern-write executor captures its
+  own originals after the batch runs, so it cannot use
+  `save_undo_snapshot_for_action` (which derives them from a preview *before*
+  the write). Added as a twelfth method.
+- **`list_pending` returned `list[Path]`.** Unimplementable against Redis, and
+  it leaked the server's home directory into the `hubspot_list_pending_writes`
+  result. Now returns action ids — which is what approve and reject take anyway.
+
+`tests/test_state_store_seam.py` (9 tests) holds the seam: nothing outside
+`state/` imports a storage module, every interface method is reached from
+`src/`, no `Path` appears in an interface signature, and — the decisive one — a
+full preview → approve cycle against an in-memory store creates no files, with
+the state directory pointed at a path asserted never to come into existence.
 
 ---
 

@@ -13,7 +13,6 @@ changes (they depend on :class:`StateStore`).
 """
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from hubspot_mcp import audit, persistence, snapshot
@@ -37,13 +36,26 @@ class FileStateStore(StateStore):
     def clear_pending(self, portal_id: str, action_id: str) -> None:
         persistence.clear(portal_id, action_id)
 
-    def list_pending(self, portal_id: str) -> list[Path]:
-        return persistence.list_pending(portal_id)
+    def list_pending(self, portal_id: str) -> list[str]:
+        # ``persistence`` is filesystem-shaped and returns paths; the action id
+        # is the filename stem.  Ordering (newest first) is preserved.
+        return [p.stem for p in persistence.list_pending(portal_id)]
 
     # --- undo snapshots ---------------------------------------------------
 
     def save_undo_snapshot_for_action(self, portal_id: str, action_id: str, preview_data: dict[str, Any]) -> None:
         snapshot.save_undo_snapshot_for_action(portal_id, action_id, preview_data)
+
+    def save_undo_snapshot(
+        self,
+        portal_id: str,
+        action_id: str,
+        original_values: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        snapshot.save_undo_snapshot(
+            snapshot.snapshot_dir_for_portal(portal_id), action_id, original_values, metadata=metadata
+        )
 
     def load_undo_snapshot(self, portal_id: str, action_id: str) -> dict[str, Any] | None:
         return snapshot.load_undo_snapshot(snapshot.snapshot_dir_for_portal(portal_id), action_id)
