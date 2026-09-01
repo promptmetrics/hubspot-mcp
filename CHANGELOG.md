@@ -20,6 +20,21 @@ Groundwork for serving over HTTPS. No user-facing behaviour change on stdio.
   path cannot be honoured by a remote store, and the previous shape leaked the
   server's home directory into the tool result. Action ids are also what
   `hubspot_approve_write` / `hubspot_reject_write` actually take.
+### Phase 2 closed — no hosted instance (D12)
+
+`hubspot-mcp` is distributed as a Claude Code plugin that each user runs locally against their
+own portal. PromptMetrics hosts nothing.
+
+The remote-HTTP work stopped after its groundwork. A single-tenant shared-secret deployment
+serves *the operator's* portal on *the operator's* bill — including the rejected requests, since
+bearer verification runs inside the function — so it could never be a way to distribute this to
+users, and the local plugin already does that better at zero infrastructure cost.
+
+Nothing is reverted. The `StateStore` / `CacheStore` seams, the async state interface and the
+shared undo/action-id decisions all improve the local path and are prerequisites for per-user
+OAuth. `BearerAuthMiddleware` and the single-tenant guard stay so that a *user* can self-host
+safely if they want to. Hosting is revisited only alongside per-user OAuth.
+
 ### Phase 2 — Task 5: single-tenant guard
 
 - **An HTTP deployment now refuses to start unless it resolves exactly one

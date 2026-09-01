@@ -91,10 +91,37 @@ Each decision: rationale, alternatives rejected, evidence.
 - **Rationale:** Phase 1 resolves tokens from env vars and stores approval/undo state in flat files. Phase 3 resolves tokens from an encrypted KV store (per-user) and stores state in KV. If both are behind interfaces, the tool layer never changes.
 - **Rejected:** Reading `os.environ` deep inside tool functions; storing undo snapshots in hardcoded paths.
 
-### D7 — Hosting: none in Phase 1; Google Cloud Run + Upstash Redis free tier in Phase 2
+### D7 — Hosting: none in Phase 1; Google Cloud Run + Upstash Redis free tier in Phase 2  ~~(superseded by D12)~~
 - **Rationale:** Cloud Run gives 2M req/mo free with real Python Docker and sub-second cold starts; Upstash gives 500k Redis commands/mo free with no daily cap. Both are $0 at low volume and scale predictably. Anthropic's MCP egress (`160.79.104.0/21`) reaches all major clouds.
 - **Rejected alternatives:** Vercel Hobby (non-commercial only — unsafe for a work integration); Render free (60s cold starts); Fly.io (no free tier for new orgs); Hugging Face Spaces (ephemeral + sleeps — fragile for OAuth state later); Cloudflare Workers Python (10ms CPU too tight for httpx+pydantic).
 - **Gotcha to document for ops:** If Cloudflare (or any WAF) is placed in front, allowlist `160.79.104.0/21` on `/mcp`, `/.well-known/*`, `/authorize`, `/token`, `/register`, `/auth/callback` — WAF bot-blocking is the single most common "couldn't reach MCP server" cause (`claude-ai-mcp#214`).
+
+### D12 — Do not host the server at all (supersedes D7), 2026-09-01
+
+- **Decision:** PromptMetrics runs no hosted instance. `hubspot-mcp` is distributed as a Claude
+  Code plugin that each user runs locally against their own portal. Phase 2 stopped after its
+  state and auth groundwork; the deployment itself (Tasks 6–7 of `docs/phase-2-build-plan.md`)
+  was dropped.
+- **Rationale:** Phase 2 as specified was *"my own server, reachable over HTTPS"* — one portal,
+  one shared `SERVER_SECRET`, no per-user identity (§4.4). It was never a distribution
+  mechanism, and using it as one has two unfixable properties: every user of the deployment
+  reads and writes **the operator's** portal with the operator's credentials, and **the operator
+  pays for every invocation** — including the 401s, since bearer verification runs inside the
+  function. Neither is a bug in the implementation; both follow from a single-tenant
+  shared-secret design. The local plugin already gives every user their own portal, their own
+  credentials and their own machine, at zero infrastructure cost.
+- **What this does not change:** the seams built along the way stay. `StateStore` and
+  `CacheStore` are wired, the interfaces are async, and undo/action-id decisions are shared
+  rather than duplicated — all improvements to the local path and prerequisites for D8/Phase 3.
+  `BearerAuthMiddleware` and the single-tenant guard remain so a **user** can self-host if they
+  want to; they are small and cost nothing to keep.
+- **Rejected alternatives:** publishing a one-click deploy template for users to self-host (the
+  friction approaches Phase 3's build cost, and the support burden lands here anyway without
+  the revenue); multi-tenant hosting with per-user OAuth (solves the portal problem but not the
+  cost one — it is only defensible with pricing attached, which makes it a P&L decision rather
+  than an infrastructure task).
+- **Revisit when:** there is a paid product to attach hosting to. Then the answer is Phase 3
+  (per-user OAuth), never a shared secret.
 
 ### D8 — Phase 3 will fork `axonops/hubspot-mcp` for the OAuth bridge; design P1/P2 to make that graft clean
 - **Rationale:** `axonops/hubspot-mcp` already implements the HubSpot-specific FastMCP `OAuthProxy` config (endpoints, scopes, `forward_pkce=False`, `client_secret_basic`), `HubSpotTokenVerifier`, and `/.well-known/*` endpoints. Forking it collapses the OAuth bridge from weeks to ~5–10 dev-days. Our Phase 1/2 tool layer should be structured to drop into that server with minimal adaptation.
@@ -159,6 +186,15 @@ User (Claude Code CLI)
 ---
 
 ## 4. Phase 2 Architecture — Remote HTTP, static bearer (Claude Code CLI)
+
+> **Superseded by D12 (2026-09-01). Phase 2 shipped its groundwork and stopped before the
+> deployment.** Tasks 1–5 of `docs/phase-2-build-plan.md` are merged — the `StateStore` and
+> `CacheStore` seams, `RedisStateStore`, an async state interface, per-request bearer auth and
+> the single-tenant guard. Tasks 6–7 (the Vercel deployment and its ops runbook) were dropped:
+> a single-tenant shared-secret deployment serves the *operator's* portal on the *operator's*
+> bill, which makes it useless as a distribution mechanism and unnecessary for anything else.
+> The section below is kept as the record of what was designed; note that several of its
+> specifics were already corrected during the build — see §1 of the build plan.
 
 ### 4.1 What changes from Phase 1
 

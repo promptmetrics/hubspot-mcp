@@ -120,7 +120,13 @@ hubspot-mcp auth login --portal <id> --mode token   # PAT fallback
 hubspot-mcp auth status --portal <id>      # show auth state
 ```
 
-### Serving over HTTP
+### Serving over HTTP (optional, self-hosted)
+
+**There is no PromptMetrics-hosted instance, by design.** The plugin above runs on your machine
+against your own portal, which is the supported path: your credentials, your data, no third
+party in between. The HTTP transport exists for anyone who wants to run their *own* instance —
+for a client that cannot spawn a local process, say. You host it, you hold the secret, it
+serves your portal only.
 
 Every HTTP request must carry `Authorization: Bearer $HUBSPOT_MCP_SERVER_SECRET`
 — protocol `2026-07-28` has no handshake, so there is no connection to
