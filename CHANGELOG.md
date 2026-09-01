@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Phase 3 — stage 1: resolving a caller's HubSpot session
+
+- **`HostedOAuthProvider`** answers "which portal did *this caller* authorise?",
+  looking the subject up in the connection store and refreshing their access
+  token when it nears expiry. Deliberately **not** a `TokenProvider`: that
+  interface resolves by `portal_id`, which on a hosted deployment is an output
+  of authentication, not an input — taking one from the caller would let anyone
+  name someone else's portal.
+- **A failed refresh is classified conclusive or transient**, the same
+  distinction the capability prober draws. A 4xx is HubSpot saying the grant is
+  gone and the user must reconnect; a 5xx, 429 or network error is HubSpot
+  having a bad minute and must not send anyone round an OAuth flow — doing so
+  wastes their time and rotates a credential that still worked. A failed refresh
+  never discards the connection record either.
+- **One refresh per subject at a time.** Two concurrent tool calls whose token
+  has just aged out would otherwise both refresh, and if HubSpot rotates the
+  refresh token the loser writes back a dead one. In-process only; the
+  cross-instance race is documented rather than solved.
+- `oauth_flow.refresh_tokens_only` splits the network half of the refresh from
+  persistence, so the local path (portal file) and the hosted path (connection
+  store) share one endpoint, one payload and one 404-fallback rule.
+
 ### Phase 3 — stage 1: per-user HubSpot connections
 
 - **`ConnectionStore`** joins an identity subject to the HubSpot portal that
