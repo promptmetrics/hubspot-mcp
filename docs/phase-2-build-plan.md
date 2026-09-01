@@ -1,6 +1,6 @@
 ---
 title: "HubSpot MCP — Phase 2 Build Plan"
-status: draft-for-review
+status: closed — tasks 1–5 shipped, 6–7 dropped (D12)
 audience: dev team
 created: 2026-09-01
 owner: Izzy
@@ -92,8 +92,8 @@ per-request `tools/list` filter.
 | 3 | ✅ **Done** (with a correction, below). **Per-request bearer auth.** `SERVER_SECRET` from env, constant-time compare, wired through the SDK's `token_verifier` rather than middleware — there is no handshake to authenticate in. `auth/bearer_middleware.py` already documents this; replace the stub. | — | 0.25d |
 | 4 | ✅ **Done** (2 of 3 caches — see below). **Move the remaining local-disk state.** Schema cache, capability cache and docs index are per-instance today; on Vercel each cold instance rebuilds them (the docs index costs ~40 fetches). Move to Redis with the same TTLs. | 1, 2 | 0.35d |
 | 5 | ✅ **Done.** **Single-tenant guard.** Refuse to start when the deployment cannot resolve exactly one portal; add a startup assertion and a test. Document the boundary in the README. | — | 0.15d |
-| 6 | **Vercel deployment.** `vercel.json` with the FastAPI entrypoint and `maxDuration`; `streamable_http_app()` mounted; env vars for `HUBSPOT_MCP_SERVER_SECRET`, HubSpot credentials, Redis URL. (`/healthz` landed with Task 3.) Preview deployment per PR. | 2, 3 | 0.4d |
-| 7 | **Ops documentation.** Update `docs/architecture.md` §4 and D7→D11; document the WAF gotcha — if anything sits in front of the endpoint, allowlist Anthropic's MCP egress `160.79.104.0/21` on `/mcp` and `/healthz`, since WAF bot-blocking is the most common "cannot reach MCP server" cause. | 6 | 0.2d |
+| 6 | ❌ **Dropped (D12).** **Vercel deployment.** `vercel.json` with the FastAPI entrypoint and `maxDuration`; `streamable_http_app()` mounted; env vars for `HUBSPOT_MCP_SERVER_SECRET`, HubSpot credentials, Redis URL. (`/healthz` landed with Task 3.) Preview deployment per PR. | 2, 3 | 0.4d |
+| 7 | ❌ **Dropped (D12).** **Ops documentation.** Update `docs/architecture.md` §4 and D7→D11; document the WAF gotcha — if anything sits in front of the endpoint, allowlist Anthropic's MCP egress `160.79.104.0/21` on `/mcp` and `/healthz`, since WAF bot-blocking is the most common "cannot reach MCP server" cause. | 6 | 0.2d |
 
 **Estimated: ~2.85 dev-days**, against the spec's ~2–3. The estimate holds only
 because Task 1 is bounded mechanical work; if the call sites resist a clean
@@ -221,6 +221,41 @@ in the type is what stops the next person getting it wrong.
 
 ---
 
+### Phase 2 closed: tasks 6–7 dropped
+
+**Decision, 2026-09-01 (D12 in `docs/architecture.md`): PromptMetrics hosts nothing.**
+
+Open Question 3 below asked whether Phase 2 earned its place. Working through the abuse and
+cost surface answered it, and not in the way the question anticipated. The problem is not that
+hosting is risky — it is that *this* deployment shape cannot do the job anyone wanted it for:
+
+- **It serves the operator's portal.** One deployment, one portal, one shared secret (§5). Every
+  user of a hosted instance reads and writes *our* HubSpot with *our* credentials. There is no
+  per-user revocation and no per-user audit trail, because there are no users — there is one
+  secret.
+- **The operator pays for every invocation, including the rejected ones.** Bearer verification
+  runs inside the function, so a 401 still bills. Vercel's WAF can reject at the edge, and spend
+  management can cap and pause, but note the cap covers metered Vercel resources only — a
+  Marketplace Redis sits outside it.
+
+Neither is an implementation defect; both follow from a single-tenant shared-secret design.
+Meanwhile the shipped plugin already gives every user their own portal, their own credentials
+and their own machine, at zero infrastructure cost — which is what was actually wanted.
+
+**What stays, and why it was still worth building:**
+
+| Shipped | Still earns its place because |
+|---|---|
+| `StateStore` seam + async interface (Tasks 1, 2a) | Removed 14 blocking filesystem calls from the event loop on the local path, and fixed a false undo promise the interface had been hiding |
+| `RedisStateStore` (Task 2b) | Prerequisite for Phase 3, and its conformance suite now holds the file store to a written contract |
+| `CacheStore` (Task 4) | The capability matrix and docs index are cleaner for it locally too |
+| Bearer auth + single-tenant guard (Tasks 3, 5) | Small, self-contained, and they let a *user* self-host safely if they choose to |
+
+Nothing is reverted. Hosting is revisited only when there is a paid product to attach it to, and
+the answer then is Phase 3 (per-user OAuth) — never a shared secret.
+
+---
+
 ## 5. What Phase 2 still does NOT include
 
 - **No OAuth, no per-user tokens, no multi-tenancy.** One portal, one shared
@@ -273,6 +308,5 @@ in the type is what stops the next person getting it wrong.
    Phase 2 single-tenant it can be an env var, but that puts a long-lived
    refresh token in the deployment config. Encrypted in Redis is better hygiene
    and is on the Phase 3 path anyway — decide now or knowingly defer.
-3. **Does Phase 2 earn its place?** Its value is burning down infrastructure risk
-   *before* OAuth risk (spec §4.5). If Cowork is not actually near-term, the
-   honest alternative is to stay on stdio and skip to Phase 3 when it is.
+3. ~~**Does Phase 2 earn its place?**~~ — **answered 2026-09-01: partly.** Its
+   groundwork did; its deployment did not. See "Phase 2 closed" above and D12.
