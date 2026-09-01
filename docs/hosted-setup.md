@@ -96,21 +96,35 @@ WorkOS is the **authorization server**: it logs people in and issues the tokens
 our server verifies. We never mint tokens ourselves, which is what keeps the
 provider swappable.
 
-1. Create a WorkOS account and a project. Use the **staging** environment first
-   — it is free at any scale.
-2. Enable **AuthKit**, and turn on the sign-in methods you want (email +
-   Google is enough for the team).
-3. **Enable Dynamic Client Registration**: dashboard → *Connect* →
-   *Configuration*. Without it, an MCP client has no way to register itself and
-   you would be pasting client IDs by hand.
-4. Copy the **AuthKit domain** — the issuer URL, of the form
+> **Order note.** Step 4 needs the deployment URL. If you have a domain in mind
+> (`hubspot-mcp.promptmetrics.dev`, say) use it now. Otherwise create the Vercel
+> project first — §3 step 1, no deploy needed — to claim the `*.vercel.app`
+> hostname, then come back.
+
+1. Create a WorkOS account and a project. Use the **staging** environment first;
+   it is free at any scale.
+2. Enable **AuthKit** and turn on the sign-in methods you want. Email plus
+   Google is enough for the team.
+3. **Enable Dynamic Client Registration**: *Connect* → *Configuration*. WorkOS
+   supports Client ID Metadata Documents natively; DCR is the fallback for MCP
+   clients that do not yet speak CIMD, and we do not know which Claude uses.
+4. **Add a Resource Indicator** for the deployment URL — `https://<domain>`,
+   no path, no trailing slash. AuthKit then issues tokens with an `aud` claim
+   matching it, which is what lets our server prove a token was minted *for us*.
+   The MCP spec requires that check; without it a token issued for some other
+   resource would be accepted here. Mark it the default so clients that omit
+   the `resource` parameter still get a bound token.
+5. Copy the **AuthKit domain** — the issuer, of the form
    `https://<something>.authkit.app`.
 
-**Bring back:** the AuthKit issuer URL.
+**Bring back:** the AuthKit issuer URL and the Resource Indicator you set. Both
+are public identifiers — **no WorkOS API key or client secret is needed**, and
+none should be shared. The server verifies tokens against the public JWKS at
+`https://<authkit-domain>/oauth2/jwks`; it never calls WorkOS with a credential.
 
 > Free to 1M monthly active users. The paid part is enterprise SSO connections
-> at $125/month each, for connecting a customer's own Okta or Entra — nothing
-> in stage 1 or 2 needs one.
+> at $125/month each, for connecting a customer's own Okta or Entra — nothing in
+> stage 1 or 2 needs one.
 
 ---
 
@@ -156,7 +170,10 @@ curl https://<domain>/healthz
 # → 200 {"status":"ok","version":"..."}
 
 curl -i https://<domain>/mcp
-# → 401 with a WWW-Authenticate challenge naming the WorkOS issuer
+# → 401, WWW-Authenticate carrying resource_metadata=...
+
+curl https://<domain>/.well-known/oauth-protected-resource
+# → names the AuthKit issuer, so a client can discover it with no configuration
 
 curl -i "https://<domain>/connect/hubspot?ticket=nope"
 # → 400 with a page saying the link expired — never a traceback
