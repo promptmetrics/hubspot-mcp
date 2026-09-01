@@ -88,7 +88,7 @@ per-request `tools/list` filter.
 | # | Task | Depends on | Est. |
 |---|---|---|---|
 | 1 | ✅ **Done.** **Route persistence through `StateStore`.** Introduce a module-level `get_store()` returning the configured implementation; convert the ~28 direct call sites in `handlers.py`, `snapshot.py`, `safety.py`, `server.py`. Behaviour-identical — `FileStateStore` stays the default and the 628 tests must pass untouched. | — | 0.75d |
-| 2 | **`RedisStateStore`.** Implement all 11 methods against Upstash (or Vercel's Redis integration). Pending previews and snapshots are Fernet-encrypted blobs keyed by `portal_id:action_id`; audit is an append-only list. Port `FileStateStore`'s tests against it via a shared conformance suite so both implementations are held to one contract. | 1 | 0.75d |
+| 2 | ✅ **Done** (as 2a + 2b). **`RedisStateStore`.** Implement all 11 methods against Upstash (or Vercel's Redis integration). Pending previews and snapshots are Fernet-encrypted blobs keyed by `portal_id:action_id`; audit is an append-only list. Port `FileStateStore`'s tests against it via a shared conformance suite so both implementations are held to one contract. | 1 | 0.75d |
 | 3 | ✅ **Done** (with a correction, below). **Per-request bearer auth.** `SERVER_SECRET` from env, constant-time compare, wired through the SDK's `token_verifier` rather than middleware — there is no handshake to authenticate in. `auth/bearer_middleware.py` already documents this; replace the stub. | — | 0.25d |
 | 4 | **Move the remaining local-disk state.** Schema cache, capability cache and docs index are per-instance today; on Vercel each cold instance rebuilds them (the docs index costs ~40 fetches). Move to Redis with the same TTLs. | 1, 2 | 0.35d |
 | 5 | **Single-tenant guard.** Refuse to start when the deployment cannot resolve exactly one portal; add a startup assertion and a test. Document the boundary in the README. | — | 0.15d |
@@ -160,6 +160,34 @@ tokens all return one identical 401.
 
 ---
 
+### Task 2 outcome — split in two, and a third plan correction
+
+The row above estimated `RedisStateStore` at "implement all 11 methods". It was
+12 (see the Task 1 outcome), and before any of them could be written the
+interface had to become **asynchronous** — which the plan does not mention.
+
+All 17 call sites are inside `async def` handlers, and `execute_pending_write`
+alone makes up to six store calls per approve. A synchronous interface would
+have stalled the event loop for six sequential network round trips on every
+approve. So the task shipped as two PRs: **2a** converts the interface (and
+fixes an existing inconsistency — Phase 1 offloaded three of those calls to a
+thread and ran fourteen inline, including snapshot writes, despite `persistence`
+taking a directory `flock` and `fsync`ing), and **2b** adds the store.
+
+Two things the plan did not call for and should have:
+
+- **Shared decisions, not duplicated ones.** `build_undo_snapshot` is now a pure
+  function in `snapshot.py` and `is_valid_action_id` is public in
+  `persistence.py`. Without that, the Redis store would have carried its own
+  copy of "is this undoable?" and "is this id safe?" — the second being a path
+  traversal on disk and a key injection in Redis. This is the same invariant
+  Phase 0 adopted for write classification.
+- **Encryption is not optional.** Previews and snapshots carry contact names,
+  emails and deal amounts into a third party's database. The store refuses to
+  start without `HUBSPOT_MCP_STATE_KEY`.
+
+---
+
 ## 5. What Phase 2 still does NOT include
 
 - **No OAuth, no per-user tokens, no multi-tenancy.** One portal, one shared
@@ -194,12 +222,20 @@ tokens all return one identical 401.
 
 ## 7. Open questions
 
-1. ~~**Redis provider**~~ — **decided 2026-09-01: Vercel's own Redis.** D7 picked
-   Upstash for its free tier, which is irrelevant on a paid team. The whole
-   argument for Vercel over Cloud Run (D11) was cutting the number of platforms
-   we operate; reaching for a marketplace third party gives half of that back.
-   One vendor, one bill, one dashboard, env vars wired to the project
-   automatically. Accepted cost: some lock-in to unpick if we ever leave Vercel.
+1. ~~**Redis provider**~~ — **decided 2026-09-01: choose at provisioning time.**
+   A previous revision of this document said "Vercel's own Redis". That was
+   wrong: **there is no first-party Vercel Redis.** Vercel KV was retired and
+   migrated to Upstash in December 2024, and `vercel.com/docs/redis` states that
+   Redis is available only through Marketplace integrations — Redis Cloud (Redis
+   Inc.), Upstash, and others. Marketplace *native* integrations bill through the
+   Vercel account, so the "second billing relationship" objection to Upstash was
+   overstated too.
+
+   It is not an architectural decision: every candidate speaks the Redis
+   protocol, so `RedisStateStore` uses `redis-py` against a single `REDIS_URL`
+   and works with any of them. Upstash's serverless advantage (per-request HTTP,
+   no connection pool) would require its vendor-specific client; that trade —
+   lock-in for a few milliseconds next to a 200ms HubSpot call — was declined.
 2. **Token storage.** Phase 1 keeps the HubSpot refresh token in a 0600 file. In
    Phase 2 single-tenant it can be an env var, but that puts a long-lived
    refresh token in the deployment config. Encrypted in Redis is better hygiene

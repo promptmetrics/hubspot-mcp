@@ -20,7 +20,15 @@ Repository = "https://github.com/promptmetrics/hubspot-mcp"
 hubspot-mcp = "hubspot_mcp.__main__:main"
 
 [project.optional-dependencies]
+# Only the hosted deployment needs these; the stdio plugin path must stay a
+# three-dependency install.
+redis = [
+    "redis>=6,<9",
+    "cryptography>=42,<50",
+]
 dev = [
+    "hubspot-mcp[redis]",
+    "fakeredis>=2.30,<3",
     "pytest>=9.0,<10",
     "pytest-asyncio>=1.0,<2",
     "pytest-httpx>=0.36,<0.37",
