@@ -33,6 +33,41 @@ def is_undoable(intent_type: str, original_values: Any) -> bool:
     )
 
 
+def build_undo_snapshot(
+    preview_data: dict[str, Any],
+    created_ids: list[str] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Derive ``(original_values, metadata)`` for a pending write's undo snapshot.
+
+    Pure — no I/O — because every :class:`~hubspot_mcp.state.base.StateStore`
+    needs this decision and only one of them writes files. Keeping it here means
+    a remote store cannot quietly disagree about what is undoable.
+
+    "merge" is deliberately absent: HubSpot has no unmerge API, so a merge
+    snapshot (both records' pre-merge properties) exists for manual
+    reconciliation only and must never offer an automated undo.
+    An UPDATE undo replays original_values; if the pre-fetch captured none
+    (every per-record GET failed at preview time — see ``_build_tool_preview``),
+    the snapshot must NOT claim undoability, or undo later reports "No original
+    values recorded" after the operator already approved believing undo was
+    available. CREATE undoes by deleting the created record (``created_ids``,
+    captured at execute), so it stays undoable regardless of original_values.
+    """
+    intent = preview_data.get("intent") or {}
+    intent_type = intent.get("intent_type", "unknown")
+    preview = preview_data.get("preview") or {}
+    original_values = preview.get("original_values", {})
+
+    metadata: dict[str, Any] = {
+        "intent_type": intent_type,
+        "target_object": intent.get("target_object"),
+        "undoable": is_undoable(intent_type, original_values),
+    }
+    if created_ids:
+        metadata["created_ids"] = created_ids
+    return original_values, metadata
+
+
 def save_undo_snapshot_for_action(
     portal_id: str,
     action_id: str,
@@ -45,31 +80,7 @@ def save_undo_snapshot_for_action(
     core used by both the CLI approve path and the daemon ``handle_approve``,
     so both capture the same undo artifact (FR-17/FR-18).
     """
-    intent = preview_data.get("intent") or {}
-    intent_type = intent.get("intent_type", "unknown")
-    target_object = intent.get("target_object")
-    preview = preview_data.get("preview") or {}
-    original_values = preview.get("original_values", {})
-
-    # "merge" is deliberately absent: HubSpot has no unmerge API, so a merge
-    # snapshot (both records' pre-merge properties) exists for manual
-    # reconciliation only and must never offer an automated undo.
-    # An UPDATE undo replays original_values; if the pre-fetch captured none
-    # (every per-record GET failed at preview time — see
-    # _build_tool_preview), the snapshot must NOT claim undoability, or undo
-    # later reports "No original values recorded" after the operator already
-    # approved believing undo was available. CREATE undos by deleting the
-    # created record (created_ids, captured at execute), so it stays undoable
-    # regardless of original_values.
-    undoable = is_undoable(intent_type, original_values)
-    metadata: dict[str, Any] = {
-        "intent_type": intent_type,
-        "target_object": target_object,
-        "undoable": undoable,
-    }
-    if created_ids:
-        metadata["created_ids"] = created_ids
-
+    original_values, metadata = build_undo_snapshot(preview_data, created_ids)
     return save_undo_snapshot(
         snapshot_dir_for_portal(portal_id),
         action_id,

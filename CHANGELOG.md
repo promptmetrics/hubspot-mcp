@@ -20,6 +20,37 @@ Groundwork for serving over HTTPS. No user-facing behaviour change on stdio.
   path cannot be honoured by a remote store, and the previous shape leaked the
   server's home directory into the tool result. Action ids are also what
   `hubspot_approve_write` / `hubspot_reject_write` actually take.
+### Phase 2 — Task 2: `RedisStateStore`
+
+The write-safety state machine can now live outside the process, which is what
+makes the server usable on a host where consecutive requests hit different
+instances. Nothing changes for the stdio plugin.
+
+- **`RedisStateStore`, provider-agnostic.** Speaks the Redis protocol via
+  `redis-py` and reads a single `REDIS_URL` — what every Vercel Marketplace
+  Redis integration injects. There is no first-party Vercel Redis, so picking a
+  vendor must not be a code change.
+- **Everything is encrypted before it leaves the process.** Pending previews and
+  undo snapshots carry HubSpot record properties — names, emails, deal
+  amounts — and are about to sit in a third party's database. `RedisStateStore`
+  refuses to start without `HUBSPOT_MCP_STATE_KEY`. A value written under a
+  rotated key reads as not-found rather than crashing the approve path.
+- **`REDIS_URL` alone selects the backend**, so the hosted deployment configures
+  itself; `HUBSPOT_MCP_STATE_BACKEND` forces `file` or `redis` when the
+  inference is wrong. The `redis` and `cryptography` dependencies are the
+  `[redis]` extra and the stdio path never imports them.
+- **The confirm-count gate is transactional.** Recording a confirmation is a
+  read-modify-write under `WATCH`, so two concurrent approves cannot both see an
+  unconfirmed preview.
+- TTLs: pending previews 24h (matching the file store's reaper), undo snapshots
+  7 days, audit capped at 1000 entries per portal.
+- **`build_undo_snapshot` extracted** as a pure function in `snapshot.py`, and
+  `persistence.is_valid_action_id` made public. Both stores now share one
+  decision about what is undoable and one about which action ids are safe —
+  on disk a crafted id is a path traversal, in Redis a key injection.
+
+`tests/test_state_store_conformance.py` runs one contract against both stores.
+
 ### Phase 2 — Task 2a: `StateStore` is now asynchronous
 
 Prerequisite for a network-backed store. No user-facing behaviour change.

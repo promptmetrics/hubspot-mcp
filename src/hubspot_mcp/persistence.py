@@ -19,8 +19,19 @@ from hubspot_mcp.config import CONFIG_DIR, _validate_portal_id
 _ACTION_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
-def _valid_action_id(action_id: str) -> bool:
+def is_valid_action_id(action_id: str) -> bool:
+    """Whether ``action_id`` is safe to use as a storage key.
+
+    Public because every :class:`~hubspot_mcp.state.base.StateStore` needs it,
+    not just this one: on disk a crafted id escapes the pending-previews
+    directory, and in Redis it injects into the key namespace. One predicate,
+    so the two implementations cannot disagree about what is safe.
+    """
     return bool(action_id and _ACTION_ID_RE.fullmatch(action_id))
+
+
+# Retained for the existing internal call sites.
+_valid_action_id = is_valid_action_id
 
 
 def _pending_previews_dir(portal_id: str) -> Path:
