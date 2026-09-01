@@ -14,7 +14,6 @@ translates to the ``snapshot_dir``-based signatures of the ported
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any
 
 
@@ -40,14 +39,34 @@ class StateStore(ABC):
         """Remove a pending preview (after approve/reject/expire)."""
 
     @abstractmethod
-    def list_pending(self, portal_id: str) -> list[Path]:
-        """List pending-preview files for the portal."""
+    def list_pending(self, portal_id: str) -> list[str]:
+        """Return the portal's pending ``action_id``s, newest first.
+
+        Action ids, not paths: a path is meaningless to a remote store and
+        useless to an MCP client, which needs the id to approve or reject.
+        """
 
     # --- undo snapshots ---------------------------------------------------
 
     @abstractmethod
     def save_undo_snapshot_for_action(self, portal_id: str, action_id: str, preview_data: dict[str, Any]) -> None:
         """Capture an undo snapshot for a pending write (FR-17/18)."""
+
+    @abstractmethod
+    def save_undo_snapshot(
+        self,
+        portal_id: str,
+        action_id: str,
+        original_values: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Write an undo snapshot from already-captured originals.
+
+        Distinct from :meth:`save_undo_snapshot_for_action`, which derives the
+        originals from a pending preview *before* the write. The pattern-write
+        executor only knows which records actually applied once the batch has
+        run, so it captures its own originals and writes them here.
+        """
 
     @abstractmethod
     def load_undo_snapshot(self, portal_id: str, action_id: str) -> dict[str, Any] | None:

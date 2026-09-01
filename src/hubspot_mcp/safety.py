@@ -17,6 +17,7 @@ from typing import Any
 
 from hubspot_mcp.models import BatchApprovalMode
 from hubspot_mcp.research import classify_url
+from hubspot_mcp.state import get_store
 from hubspot_mcp.validation import format_scope_error, validate_scopes
 
 
@@ -119,7 +120,7 @@ async def apply_write(
     (a) scope validation via ``validate_scopes`` (raises :class:`ScopeBlocked`);
     (b) ``preview_builder(client)`` to build the preview;
     (c) mint ``action_id``, normalize informing sources, assemble ``preview_data``;
-    (d) persist via ``persistence.store``.
+    (d) persist via the state store.
 
     The caller owns the client lifecycle and the preview-text / AgentResult
     rendering.  ``agent_name`` is required for the agent-path scope check.
@@ -213,16 +214,13 @@ async def apply_write(
         over_threshold = pattern_confirm_threshold is not None and count > pattern_confirm_threshold
         preview_data["required_confirmation"] = count if over_threshold else 0
         preview_data["approval_tier"] = "FULL_GATE" if over_threshold else "CONFIRM"
-    # The plugin resolved this lazily through ``orchestrator`` purely to keep a
-    # monkeypatch target observable; the tools-only server drops that module and
-    # binds ``persistence.store`` directly.
-    from hubspot_mcp.persistence import store as _store_pending_preview
-
     # Offload the blocking flock+fsync to a worker thread so concurrent daemon
     # RPCs don't stall the event loop (#6).  The CLI sync path wraps this in
     # _run_async and is unaffected; the flock still serializes cross-process
     # writes — it just no longer runs on the asyncio loop.
-    await asyncio.to_thread(_store_pending_preview, portal_config.portal_id, action_id, preview_data)
+    await asyncio.to_thread(
+        get_store().store_pending, portal_config.portal_id, action_id, preview_data
+    )
 
     return ApplyWriteResult(
         preview=preview,
