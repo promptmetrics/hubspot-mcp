@@ -75,3 +75,25 @@ def test_no_tracked_file_escapes_the_shipping_allowlist():
         cwd=REPO, capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_user_config_fields_carry_everything_the_validator_requires():
+    """`claude plugin validate` rejects a userConfig field with no `title`.
+
+    Every field was missing one since the plugin was first published — the
+    manifest was only ever validated by hand, and the settings UI has nothing
+    to label the input with.
+    """
+    for name, field in _plugin()["userConfig"].items():
+        assert field.get("title"), f"userConfig.{name} has no title"
+        assert field.get("description"), f"userConfig.{name} has no description"
+        assert field.get("type"), f"userConfig.{name} has no type"
+
+
+def test_the_client_secret_is_marked_sensitive():
+    """It is a credential; the settings UI must not render it in plain text."""
+    assert _plugin()["userConfig"]["hubspot_client_secret"].get("sensitive") is True
+
+
+def test_marketplace_has_a_description():
+    assert _marketplace().get("description"), "validator warns without one"
