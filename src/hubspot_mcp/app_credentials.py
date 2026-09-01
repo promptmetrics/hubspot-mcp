@@ -1,10 +1,23 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 from hubspot_mcp.fileio import write_private_json
+
+# A hosted deployment has no writable home directory, so the app credentials
+# cannot come from a file there. Environment wins over the file: a deployment
+# sets these deliberately, whereas the file is written by the plugin's
+# SessionStart hook and may be a leftover from a different app.
+CLIENT_ID_ENV = "HUBSPOT_CLIENT_ID"
+CLIENT_SECRET_ENV = "HUBSPOT_CLIENT_SECRET"  # noqa: S105 — the env var name, not a secret
+REGION_ENV = "HUBSPOT_REGION"
+
+
+def _from_env(name: str) -> str | None:
+    return os.environ.get(name, "").strip() or None
 
 
 def _credentials_file() -> Path:
@@ -48,17 +61,31 @@ def save_app_credentials(
 
 
 def get_client_id() -> str | None:
+    env = _from_env(CLIENT_ID_ENV)
+    if env:
+        return env
     creds = load_app_credentials()
     return creds.get("client_id") if creds else None
 
 
 def get_client_secret() -> str | None:
+    env = _from_env(CLIENT_SECRET_ENV)
+    if env:
+        return env
     creds = load_app_credentials()
     return creds.get("client_secret") if creds else None
 
 
 def get_region() -> str:
-    """Return the configured app region (``"us"`` or ``"eu"``); default ``"us"``."""
+    """Return the configured app region (``"us"`` or ``"eu"``); default ``"us"``.
+
+    An unrecognised value falls back to ``"us"`` rather than raising: the region
+    only selects the authorize host, and refusing to start over a typo in an
+    optional variable is worse than serving the default.
+    """
+    env = _from_env(REGION_ENV)
+    if env:
+        return env if env in _REGIONS else "us"
     creds = load_app_credentials()
     region = creds.get("region", "us") if creds else "us"
     return region if region in _REGIONS else "us"
