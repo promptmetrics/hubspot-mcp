@@ -37,6 +37,22 @@ def set_search_backend(backend: SearchBackend | None) -> None:
     _default_backend = backend
 
 
+def _builtin_backend() -> SearchBackend | None:
+    """The keyless official-docs backend, resolved lazily.
+
+    Imported here rather than at module scope because ``docs_backend`` imports
+    ``DocsResult`` from this module. Resolving it at call time also means the
+    tool behaves the same however it was reached -- via the MCP server, the CLI,
+    or a direct import in a test -- instead of depending on whether some other
+    module ran a registration function first.
+    """
+    try:
+        from hubspot_mcp.docs_backend import search_official_docs
+    except ImportError:
+        return None
+    return search_official_docs
+
+
 def _truncate_snippet(text: str) -> str:
     if len(text) <= _MAX_SNIPPET_CHARS:
         return text
@@ -70,16 +86,25 @@ async def hubspot_docs_search(
     domain_hint: str | None = None,
     api_version: str | None = None,
     search_backend: SearchBackend | None = None,
+    client: Any | None = None,
+    portal_id: str = "",
 ) -> dict[str, Any]:
+    # ``client``/``portal_id`` are unused -- this is the one tool that talks to
+    # HubSpot's docs site rather than its API -- but ``invoke_tool`` passes both
+    # to every tool, so omitting them made every call through the MCP path raise
+    # TypeError. They are stripped from the generated JSON schema by
+    # ``server._domain_params``, so they never reach a client.
     selected_sources: list[Source] = sources or ["official", "community"]
-    backend = search_backend or _default_backend
+    backend = search_backend or _default_backend or _builtin_backend()
     warnings: list[str] = []
 
     if backend is None:
+        # Only reachable if the built-in backend module is unavailable, which
+        # means a broken install rather than a missing configuration.
         return {
             "query": query,
             "results": [],
-            "search_warnings": ["no search backend configured"],
+            "search_warnings": ["no search backend available"],
         }
 
     full_query = _build_query(query, domain_hint, api_version)

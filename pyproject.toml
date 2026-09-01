@@ -43,6 +43,9 @@ packages = ["src/hubspot_mcp"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "live_docs_backend: test drives the docs backend directly (still respx-mocked)",
+]
 [tool.ruff]
 line-length = 110
 target-version = "py312"

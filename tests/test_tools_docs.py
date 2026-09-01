@@ -29,11 +29,27 @@ def test_build_query_with_hints():
 
 
 @pytest.mark.asyncio
-async def test_no_backend_returns_empty_with_warning():
+async def test_falls_back_to_the_builtin_backend(monkeypatch):
+    """With no backend registered, the built-in keyless one is used.
+
+    Upstream asserted the opposite -- that an unregistered backend returns an
+    empty result set with a "no search backend configured" warning. That was the
+    defect: the tool's own description tells the model to consult it before a
+    write, so an empty success reads as "the docs say nothing".
+    """
     set_search_backend(None)
-    result = await hubspot_docs_search(query="contacts")
-    assert result["results"] == []
-    assert "no search backend configured" in result["search_warnings"]
+
+    called: dict[str, object] = {}
+
+    async def fake_builtin(query, domain, limit):
+        called["domain"] = domain
+        return []
+
+    monkeypatch.setattr("hubspot_mcp.tools.docs._builtin_backend", lambda: fake_builtin)
+    result = await hubspot_docs_search(query="contacts", sources=["official"])
+
+    assert called["domain"] == "developers.hubspot.com"
+    assert "no search backend configured" not in result["search_warnings"]
 
 
 @pytest.mark.asyncio
