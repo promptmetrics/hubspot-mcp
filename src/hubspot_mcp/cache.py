@@ -92,6 +92,28 @@ async def discover_custom_schemas(portal_config: PortalConfig) -> list[str]:
 
 
 class SchemaCache:
+    """Per-portal object/property schema, cached on local disk.
+
+    **Deliberately not moved to Redis in Phase 2**, unlike the capability matrix
+    and the docs index. Every writer here is async, but the readers are not:
+    ``validation``, ``tools/objects``, ``agent_routing`` and the agent prompt
+    builders all call ``get`` / ``list_custom_object_names`` from synchronous
+    code, and the prompt builders are invoked synchronously from
+    ``prompts/list``. Making this async means rewriting the validation and
+    prompt layers — which the Phase 2 plan names as the signal that a seam is in
+    the wrong place.
+
+    The cost of leaving it per-instance is small and bounded: a cold instance
+    re-warms the standard schemas in ``app_lifespan``, which is the same work a
+    fresh stdio session already does today. Contrast the capability matrix,
+    where a per-instance copy makes two instances advertise *different tool
+    lists* for one portal, and the docs index, where a cold build is ~40
+    outbound fetches.
+
+    If cold-start cost ever does matter: hydrate this from a shared cache in the
+    lifespan and push back on write, keeping the synchronous reader interface.
+    """
+
     TTL_SECONDS = 3600  # 1 hour
 
     def __init__(self, portal_id: str, base_dir: Path | None = None) -> None:

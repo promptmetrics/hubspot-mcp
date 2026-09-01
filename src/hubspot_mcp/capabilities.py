@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import json
-import time
-from pathlib import Path
-from typing import Any
-
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.errors import HubSpotError
+from hubspot_mcp.state.cache_store import get_cache_store
 
 
 class CapabilityMatrix(BaseModel):
@@ -30,45 +26,39 @@ class CapabilityMatrix(BaseModel):
 
 
 class CapabilityCache:
+    """The portal's entitlement matrix, cached behind :class:`CacheStore`.
+
+    Shared rather than per-instance on a multi-instance host, and not only to
+    save five probe calls per cold start: ``_unadvertise_unavailable_tools``
+    removes tools from ``tools/list`` based on this matrix, so two instances
+    that probed independently — one cleanly, one through a transient 5xx —
+    would advertise different tool lists for the same portal.
+    """
+
     TTL_SECONDS = 86400  # 24 hours
+    NAME = "capabilities"
 
-    def __init__(self, portal_id: str, base_dir: Path | None = None) -> None:
+    def __init__(self, portal_id: str) -> None:
         self.portal_id = portal_id
-        self.base_dir = base_dir or (Path.home() / ".claude" / "hubspot" / portal_id)
-        self.cache_file = self.base_dir / "capabilities.json"
-        self._data: dict[str, Any] = {}
-        self._load()
 
-    def _load(self) -> None:
-        if self.cache_file.exists():
-            try:
-                self._data = json.loads(self.cache_file.read_text())
-            except json.JSONDecodeError:
-                self._data = {}
-        else:
-            self._data = {}
-
-    def _save(self) -> None:
-        self.base_dir.mkdir(parents=True, exist_ok=True)
-        self.cache_file.write_text(json.dumps(self._data, indent=2))
-
-    def get(self) -> CapabilityMatrix | None:
-        entry = self._data.get("matrix")
-        if entry is None:
+    async def get(self) -> CapabilityMatrix | None:
+        cached = await get_cache_store().get(self.portal_id, self.NAME)
+        if cached is None:
             return None
-        ts = entry.get("_timestamp", 0)
-        if time.time() - ts > self.TTL_SECONDS:
+        try:
+            return CapabilityMatrix.model_validate(cached)
+        except ValidationError:
+            # A matrix written by an older shape reads as a miss, so the probe
+            # runs again rather than the server trusting a half-parsed answer.
             return None
-        return CapabilityMatrix.model_validate(entry.get("data", {}))
 
-    def set(self, matrix: CapabilityMatrix) -> None:
-        self._data["matrix"] = {"_timestamp": time.time(), "data": matrix.model_dump()}
-        self._save()
+    async def set(self, matrix: CapabilityMatrix) -> None:
+        await get_cache_store().set(
+            self.portal_id, self.NAME, matrix.model_dump(), ttl_seconds=self.TTL_SECONDS
+        )
 
-    def invalidate(self) -> None:
-        self._data = {}
-        if self.cache_file.exists():
-            self.cache_file.unlink()
+    async def invalidate(self) -> None:
+        await get_cache_store().delete(self.portal_id, self.NAME)
 
 
 _AGENT_CAPABILITY_REQUIREMENTS: dict[str, list[str]] = {
@@ -103,7 +93,7 @@ async def _probe_bool(client: HubSpotClient, path: str, portal_id: str) -> bool 
 
 async def probe_portal(portal_config: PortalConfig) -> CapabilityMatrix:
     cache = CapabilityCache(portal_config.portal_id)
-    cached = cache.get()
+    cached = await cache.get()
     if cached is not None:
         return cached
 
@@ -159,7 +149,7 @@ async def probe_portal(portal_config: PortalConfig) -> CapabilityMatrix:
         await client.close()
 
     if cacheable:
-        cache.set(matrix)
+        await cache.set(matrix)
     return matrix
 
 
@@ -217,7 +207,7 @@ def missing_capabilities_for_tool(tool_name: str, matrix: CapabilityMatrix) -> l
     return [f for f in required if not has_capability(matrix, f)]
 
 
-def probe_was_conclusive(portal_id: str) -> bool:
+async def probe_was_conclusive(portal_id: str) -> bool:
     """Whether the last probe was definitive enough to persist.
 
     ``probe_portal`` writes the cache only when every probe returned a
@@ -228,4 +218,4 @@ def probe_was_conclusive(portal_id: str) -> bool:
     with no cache entry to explain it -- so callers that hide tools must gate on
     this, and callers that merely explain a refusal need not.
     """
-    return CapabilityCache(portal_id).get() is not None
+    return await CapabilityCache(portal_id).get() is not None

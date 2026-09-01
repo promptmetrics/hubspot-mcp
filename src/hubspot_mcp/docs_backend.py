@@ -36,20 +36,17 @@ and never a silent empty result.
 """
 from __future__ import annotations
 
-import json
 import re
-import time
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
 
 import httpx
 
+from hubspot_mcp.state.cache_store import get_cache_store
 from hubspot_mcp.tools.docs import OFFICIAL_DOMAIN, DocsResult
 
 INDEX_URL = "https://developers.hubspot.com/docs/llms.txt"
 _INDEX_TTL_SECONDS = 24 * 60 * 60
-_INDEX_CACHE_NAME = "docs_index.json"
+_INDEX_CACHE_NAME = "docs_index"
 # Fetching a page per candidate is the expensive part; the tool asks for at most
 # `max_results_per_source`, and we cap regardless so a broad query cannot fan
 # out into dozens of requests.
@@ -134,21 +131,9 @@ def parse_index(text: str) -> list[DocEntry]:
     return entries
 
 
-def _cache_path() -> Path:
-    # The docs index is global, not per-portal, so it sits at the config root
-    # rather than under a portal directory.
-    from hubspot_mcp.config import CONFIG_DIR
-
-    return CONFIG_DIR / _INDEX_CACHE_NAME
-
-
-def _read_cached_index() -> list[DocEntry] | None:
-    path = _cache_path()
-    try:
-        payload = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
-    if time.time() - payload.get("_fetched_at", 0) > _INDEX_TTL_SECONDS:
+async def _read_cached_index() -> list[DocEntry] | None:
+    payload = await get_cache_store().get(None, _INDEX_CACHE_NAME)
+    if payload is None:
         return None
     try:
         return [DocEntry(**e) for e in payload["entries"]]
@@ -156,18 +141,16 @@ def _read_cached_index() -> list[DocEntry] | None:
         return None
 
 
-def _write_cached_index(entries: list[DocEntry]) -> None:
-    from hubspot_mcp.fileio import write_private_json
-
-    payload: dict[str, Any] = {
-        "_fetched_at": time.time(),
-        "entries": [e.__dict__ for e in entries],
-    }
-    try:
-        write_private_json(_cache_path(), payload)
-    except OSError:
-        # A read-only or full disk must not fail the search; we just refetch.
-        pass
+async def _write_cached_index(entries: list[DocEntry]) -> None:
+    # Scope is None: the catalogue is HubSpot's public documentation, identical
+    # for every portal. On a multi-instance host that means it is built once per
+    # deployment rather than ~40 outbound fetches per cold instance.
+    await get_cache_store().set(
+        None,
+        _INDEX_CACHE_NAME,
+        {"entries": [e.__dict__ for e in entries]},
+        ttl_seconds=_INDEX_TTL_SECONDS,
+    )
 
 
 async def _expand_catalogue(client: httpx.AsyncClient) -> list[DocEntry]:
@@ -208,7 +191,7 @@ async def _expand_catalogue(client: httpx.AsyncClient) -> list[DocEntry]:
 
 async def load_index(client: httpx.AsyncClient | None = None) -> list[DocEntry]:
     """Return the parsed catalogue, from cache when fresh."""
-    cached = _read_cached_index()
+    cached = await _read_cached_index()
     if cached:
         return cached
 
@@ -226,7 +209,7 @@ async def load_index(client: httpx.AsyncClient | None = None) -> list[DocEntry]:
         raise DocsIndexUnavailable(
             f"{INDEX_URL} expanded to zero pages — the docs index format may have changed"
         )
-    _write_cached_index(entries)
+    await _write_cached_index(entries)
     return entries
 
 

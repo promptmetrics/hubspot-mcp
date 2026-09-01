@@ -20,6 +20,32 @@ Groundwork for serving over HTTPS. No user-facing behaviour change on stdio.
   path cannot be honoured by a remote store, and the previous shape leaked the
   server's home directory into the tool result. Action ids are also what
   `hubspot_approve_write` / `hubspot_reject_write` actually take.
+### Phase 2 — Task 4: shared caches
+
+- **New `CacheStore` interface**, separate from `StateStore` because the two
+  need opposite failure behaviour. Losing a pending preview breaks an approve,
+  so `StateStore` lets backend errors surface. Losing a cached capability matrix
+  costs a refetch, so a `CacheStore` backend failure reads as a **miss** — a
+  Redis blip must not fail tool calls that could have gone to HubSpot instead.
+- **The capability matrix is now shared.** Not just to save five probe calls per
+  cold start: `_unadvertise_unavailable_tools` removes tools from `tools/list`
+  based on this matrix, so two instances that probed independently — one
+  cleanly, one through a transient 5xx — would advertise different tool lists
+  for the same portal.
+- **The docs index is now shared and global.** A cold build is ~40 outbound
+  fetches taking ~5.5s; it is now built once per deployment rather than once per
+  instance. It is HubSpot's public documentation, identical for every portal, so
+  it is cached unscoped.
+- **The schema cache deliberately stays on local disk.** Its readers are
+  synchronous — `validation`, `tools/objects`, `agent_routing` and the agent
+  prompt builders — so moving it means rewriting the validation and prompt
+  layers. A cold instance simply re-warms standard schemas in the lifespan,
+  which is what a fresh stdio session already does.
+- The file backend keeps the exact paths it used before
+  (`CONFIG_DIR/<portal>/capabilities.json`, `CONFIG_DIR/docs_index.json`), so no
+  local cache is orphaned on upgrade. Expiry moved from a field inside each
+  value to the store, which is what lets Redis use a native TTL.
+
 ### Phase 2 — Task 2: `RedisStateStore`
 
 The write-safety state machine can now live outside the process, which is what
