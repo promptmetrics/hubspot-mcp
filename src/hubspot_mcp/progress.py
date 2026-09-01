@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +28,7 @@ class ProgressTracker:
         self.base_dir = base_dir or (Path.home() / ".claude" / "hubspot" / portal_id)
         self.progress_file = self.base_dir / "progress" / f"{action_id}.json"
 
-        self._started_at = datetime.now(timezone.utc)
+        self._started_at = datetime.now(UTC)
         self._completed_chunks = 0
         self._processed_records = 0
         self._failed_records = 0
@@ -62,7 +62,7 @@ class ProgressTracker:
         if self._completed_chunks == 0 or self._completed_chunks >= self.total_chunks:
             return None
         elapsed = max(
-            0.0, (datetime.now(timezone.utc) - self._started_at).total_seconds()
+            0.0, (datetime.now(UTC) - self._started_at).total_seconds()
         )
         seconds_per_chunk = elapsed / self._completed_chunks
         remaining_chunks = self.total_chunks - self._completed_chunks

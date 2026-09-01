@@ -4,12 +4,12 @@ import pytest
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.tools.service import (
-    hubspot_get_knowledge_base_article,
-    hubspot_list_kb_articles,
-    hubspot_get_ticket_pipeline,
     hubspot_create_ticket_pipeline,
-    hubspot_list_service_automation,
     hubspot_get_feedback_survey,
+    hubspot_get_knowledge_base_article,
+    hubspot_get_ticket_pipeline,
+    hubspot_list_kb_articles,
+    hubspot_list_service_automation,
 )
 
 

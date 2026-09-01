@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +50,7 @@ class CheckpointManager:
         errors: list[dict[str, Any]] | None = None,
     ) -> None:
         self._append_atomic({
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "action_id": self.action_id,
             "chunk_index": chunk_index,
             "operation": operation,
@@ -110,7 +110,7 @@ class CheckpointManager:
                         except json.JSONDecodeError:
                             return None
 
-                    loaded = [_load_line(l) for l in lines]
+                    loaded = [_load_line(line) for line in lines]
                     valid = [e for e in loaded if isinstance(e, dict)]
                     if not valid:
                         continue

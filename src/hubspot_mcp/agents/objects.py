@@ -5,7 +5,7 @@ from hubspot_mcp.agents._base import AgentPrompt, build_agent_prompt
 from hubspot_mcp.cache import SchemaCache
 from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.dispatch import register_execute, register_preview, register_reconcile
-from hubspot_mcp.models import PreviewResult, RiskLevel, TaskIntent
+from hubspot_mcp.models import PreviewResult, TaskIntent
 from hubspot_mcp.tools import get_tool, invoke_tool
 
 _TOOL_NAMES = [

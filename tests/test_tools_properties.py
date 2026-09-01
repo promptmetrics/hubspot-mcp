@@ -4,11 +4,11 @@ import pytest
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.tools.properties import (
+    hubspot_create_property,
+    hubspot_delete_property,
     hubspot_get_property,
     hubspot_list_properties,
-    hubspot_create_property,
     hubspot_update_property,
-    hubspot_delete_property,
 )
 
 

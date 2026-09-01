@@ -2,10 +2,9 @@ import pytest
 
 from hubspot_mcp.cache import SchemaCache
 from hubspot_mcp.validation import (
-    ValidationError,
+    _type_compatible,
     filter_writable_properties,
     validate_properties,
-    _type_compatible,
 )
 
 

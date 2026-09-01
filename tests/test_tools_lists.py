@@ -4,12 +4,12 @@ import pytest
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.tools.lists import (
+    hubspot_add_to_list,
+    hubspot_create_list,
     hubspot_get_list,
     hubspot_list_lists,
-    hubspot_create_list,
-    hubspot_update_list,
-    hubspot_add_to_list,
     hubspot_remove_from_list,
+    hubspot_update_list,
 )
 
 

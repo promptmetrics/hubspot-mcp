@@ -3,12 +3,13 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote, urlencode
 
+from hubspot_mcp.cache import STANDARD_OBJECT_TYPES as _VALID_OBJECT_TYPES
+from hubspot_mcp.cache import SchemaCache
 from hubspot_mcp.checkpoint import CheckpointManager
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.errors import HubSpotError, RateLimitError, ScopeError
 from hubspot_mcp.progress import ProgressTracker
 from hubspot_mcp.tools import tool
-from hubspot_mcp.cache import STANDARD_OBJECT_TYPES as _VALID_OBJECT_TYPES, SchemaCache
 from hubspot_mcp.validation import validate_properties
 
 

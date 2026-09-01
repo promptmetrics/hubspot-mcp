@@ -1,4 +1,3 @@
-import json
 
 from hubspot_mcp.audit import get_recent_audits, log_write
 

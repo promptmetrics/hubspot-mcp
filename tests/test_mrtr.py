@@ -13,10 +13,9 @@ for such clients.
 """
 from __future__ import annotations
 
-import pytest
 import mcp_types as T
+import pytest
 from mcp import Client
-from unittest.mock import patch
 
 from hubspot_mcp.client import APIResponse
 from hubspot_mcp.config import PortalConfig

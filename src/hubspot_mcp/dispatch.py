@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.models import PreviewResult, TaskIntent

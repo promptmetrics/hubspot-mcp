@@ -4,11 +4,11 @@ import pytest
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.tools.users import (
+    hubspot_create_user,
+    hubspot_deactivate_user,
     hubspot_get_user,
     hubspot_list_users,
-    hubspot_create_user,
     hubspot_update_user,
-    hubspot_deactivate_user,
 )
 
 

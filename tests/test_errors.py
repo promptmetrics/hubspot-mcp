@@ -1,4 +1,3 @@
-import pytest
 
 from hubspot_mcp.errors import (
     ErrorCategory,

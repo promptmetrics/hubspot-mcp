@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 
 @dataclass
@@ -34,9 +35,9 @@ def get_blueprint(name: str) -> WorkflowBlueprint | None:
 # Loader is imported after the registry + dataclass exist so its ``from . import``
 # resolves against this partially-initialized module without a cycle.
 from .loader import (  # noqa: E402
+    list_drafts,
     load_packaged_blueprints,
     load_user_blueprints,
-    list_drafts,
 )
 
 

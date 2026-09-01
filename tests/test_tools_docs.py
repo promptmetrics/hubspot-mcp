@@ -2,7 +2,6 @@ import pytest
 
 from hubspot_mcp.tools.docs import (
     DocsResult,
-    SearchBackend,
     _build_query,
     _truncate_snippet,
     hubspot_docs_search,

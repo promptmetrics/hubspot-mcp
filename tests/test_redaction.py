@@ -1,6 +1,6 @@
 import pytest
 
-from hubspot_mcp.redaction import redact, redact_dict_for_disk, _looks_like_name
+from hubspot_mcp.redaction import _looks_like_name, redact, redact_dict_for_disk
 
 
 def test_redact_off_returns_unchanged():

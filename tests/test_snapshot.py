@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 from hubspot_mcp.snapshot import delete_undo_snapshot, load_undo_snapshot, save_undo_snapshot
 

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.config import PortalConfig
 

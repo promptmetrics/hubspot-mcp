@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from typing import Any
-
 
 _REDACTION_LEVELS = frozenset({"off", "pii", "full"})
 

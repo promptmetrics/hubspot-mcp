@@ -76,6 +76,14 @@ def _cmd_auth_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_auth_scopes(args: argparse.Namespace) -> int:
+    """Print the derived scope set, space-separated for `--scopes $(...)`."""
+    from hubspot_mcp.scope_registry import authorize_scopes
+
+    print(" ".join(authorize_scopes()))
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="hubspot-mcp", description="HubSpot MCP server")
     p.add_argument("--portal", help="HubSpot portal ID (or set HUBSPOT_PORTAL)")
@@ -104,6 +112,11 @@ def _build_parser() -> argparse.ArgumentParser:
     login.add_argument("--callback-port", type=int, default=3000)
     login.add_argument("--no-browser", action="store_true", help="Print the authorize URL instead of opening a browser")
     login.set_defaults(func=_cmd_auth_login)
+
+    scopes_p = auth_sub.add_parser(
+        "scopes", help="Print the exact OAuth scope set this server needs"
+    )
+    scopes_p.set_defaults(func=_cmd_auth_scopes)
 
     status = auth_sub.add_parser("status", help="Show a portal's auth state")
     status.add_argument("--portal", help="HubSpot portal ID (or set HUBSPOT_PORTAL)")

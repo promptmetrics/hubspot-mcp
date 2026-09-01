@@ -26,17 +26,31 @@ from the plugin config; the app client_id / client_secret are read from
 wrote from the plugin settings — they are NOT in this command):
 
 ```sh
-"${CLAUDE_PLUGIN_DATA}/venv/bin/hubspot-mcp" auth login \
+HS="${CLAUDE_PLUGIN_DATA}/venv/bin/hubspot-mcp"
+"$HS" auth login \
   --portal "${user_config.hubspot_portal_id}" \
-  --scopes crm.objects.contacts.read crm.objects.contacts.write crm.objects.companies.read crm.objects.deals.read crm.objects.deals.write
+  --scopes $("$HS" auth scopes)
 ```
+
+`auth scopes` derives the exact set from the tool registry, so it cannot drift
+as tools are added. Do **not** paste a hardcoded list: an earlier version of
+this skill requested five scopes, which 403s every ticket, list, workflow,
+user, pipeline and engagement tool.
+
+Two exclusions are deliberate, and both will look like omissions:
+
+- **No `.delete` scopes.** Least privilege — destructive access is not
+  requested by default. A portal that has already granted them keeps them.
+- **No `crm.objects.{notes,calls,tasks,emails}.*`.** HubSpot documents these in
+  403 bodies but does not offer them in the app scope picker, and requesting
+  one makes HubSpot reject the *entire* authorize call.
 
 Tell the user to complete the browser approval. After the command prints
 `OAuth login succeeded for portal <id>`, the HubSpot MCP tools are live for
 this session.
 
-If the user needs a different scope set, change the `--scopes` list — the
-granted scopes must match what their HubSpot app is permitted to request.
+The user's HubSpot app must be permitted to request these scopes; if the
+authorize page errors, the app's scope configuration is the place to look.
 
 ## If the command is not found
 

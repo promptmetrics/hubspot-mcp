@@ -662,8 +662,9 @@ def _make_agent_prompt(agent_key: str):
 
 
 def _register_agent_prompts() -> None:
-    from hubspot_mcp.agents import _AGENT_REGISTRY
     from mcp.server.mcpserver.prompts import Prompt
+
+    from hubspot_mcp.agents import _AGENT_REGISTRY
 
     for agent_key in sorted(_AGENT_REGISTRY):
         fn = _make_agent_prompt(agent_key)

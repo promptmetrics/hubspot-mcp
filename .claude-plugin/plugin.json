@@ -1,10 +1,18 @@
 {
   "name": "hubspot-mcp",
   "version": "0.1.1",
-  "description": "HubSpot CRM MCP server — 76 domain tools + write-safety preview/approve gate, undo snapshots, audit log. Bring-your-own-app OAuth.",
-  "author": { "name": "Izzy Aly" },
+  "description": "HubSpot CRM MCP server (protocol 2026-07-28) \u2014 79 domain tools + write-safety preview/approve gate with risk-tiered approval, pattern approval, undo snapshots and audit log, plus 44 specialist charters as MCP prompts. Bring-your-own-app OAuth.",
+  "author": {
+    "name": "Izzy Aly"
+  },
   "license": "MIT",
-  "keywords": ["hubspot", "crm", "mcp", "model-context-protocol", "claude"],
+  "keywords": [
+    "hubspot",
+    "crm",
+    "mcp",
+    "model-context-protocol",
+    "claude"
+  ],
   "userConfig": {
     "hubspot_client_id": {
       "type": "string",
@@ -31,7 +39,9 @@
   "mcpServers": {
     "hubspot": {
       "command": "sh",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/run-mcp.sh"],
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bin/run-mcp.sh"
+      ],
       "env": {
         "HUBSPOT_PORTAL": "${user_config.hubspot_portal_id}"
       }

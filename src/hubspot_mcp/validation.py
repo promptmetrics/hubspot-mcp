@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import json
 from difflib import get_close_matches
 from typing import Any
 
 from hubspot_mcp.cache import SchemaCache
-
-
 from hubspot_mcp.scope_registry import get_required_scopes_for_agent
 
 

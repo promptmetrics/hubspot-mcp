@@ -11,7 +11,6 @@ R1 requires >= 95% accuracy on ``tests/routing_corpus.yaml``, gated in CI.
 from __future__ import annotations
 
 import re
-from typing import Any
 
 _SEQUENTIAL_TRIGGERS = [" and ", " then ", " followed by "]
 

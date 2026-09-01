@@ -17,12 +17,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from hubspot_mcp.blueprints.workflows.action_type_map import (
+    AMBIGUOUS_EVENT_TYPE_IDS,
     INVERSE_ACTION_TYPES,
     INVERSE_CUSTOM_OBJECT_MAP,
     INVERSE_EVENT_TYPE_MAP,
     INVERSE_OBJECT_TYPE_IDS,
     INVERSE_OPERATOR_MAP,
-    AMBIGUOUS_EVENT_TYPE_IDS,
 )
 
 _UNIT_DELAY_WORD = {"MINUTES": "minutes", "DAYS": "days", "HOURS": "hours"}

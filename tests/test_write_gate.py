@@ -237,3 +237,62 @@ class TestOAuthStateTraversal:
     def test_legitimate_state_still_resolves(self, tmp_path, monkeypatch):
         oauth_flow = self._isolated(tmp_path, monkeypatch)
         assert oauth_flow._oauth_state_file("aB3-_x").name == "aB3-_x.json"
+
+
+# --- OAuth scope derivation (R4 + hidden-scope exclusion) --------------------
+
+class TestAuthorizeScopes:
+    """The scope set requested at authorize time is derived, not hardcoded.
+
+    A hardcoded list under-provisions silently as tools are added -- the auth
+    skill previously asked for five scopes, which 403s every ticket, list,
+    workflow, user, pipeline and engagement tool.
+    """
+
+    def test_no_delete_scopes_are_requested(self):
+        """R4: least privilege — destructive access is never requested by default."""
+        from hubspot_mcp.scope_registry import authorize_scopes
+
+        assert [s for s in authorize_scopes() if s.endswith(".delete")] == []
+
+    def test_hidden_engagement_scopes_are_excluded(self):
+        """HubSpot rejects the WHOLE authorize call if these are requested."""
+        from hubspot_mcp.scope_registry import authorize_scopes
+
+        hidden = [
+            s
+            for s in authorize_scopes()
+            if any(s.startswith(f"crm.objects.{o}.") for o in ("notes", "calls", "tasks", "emails"))
+        ]
+        assert hidden == []
+
+    def test_covers_the_domains_the_old_hardcoded_list_missed(self):
+        from hubspot_mcp.scope_registry import authorize_scopes
+
+        scopes = set(authorize_scopes())
+        for needed in (
+            "crm.objects.tickets.read",
+            "crm.lists.write",
+            "automation",
+            "settings.users.read",
+            "crm.schemas.contacts.read",
+        ):
+            assert needed in scopes, f"{needed} missing — tools using it would 403"
+
+    def test_is_derived_from_the_live_tool_registry(self):
+        """A new write tool must widen the grant automatically."""
+        from hubspot_mcp.scope_registry import authorize_scopes, get_required_scopes
+        from hubspot_mcp.tools import list_tools
+
+        scopes = set(authorize_scopes())
+        for tool_def in list_tools():
+            required = get_required_scopes([tool_def.name], "contacts")
+            requestable = {
+                s
+                for s in required
+                if not s.endswith(".delete")
+                and not any(
+                    s.startswith(f"crm.objects.{o}.") for o in ("notes", "calls", "tasks", "emails")
+                )
+            }
+            assert requestable <= scopes, f"{tool_def.name} needs scopes we never request"

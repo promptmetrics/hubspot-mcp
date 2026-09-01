@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from hubspot_mcp.models import BatchApprovalMode
 from hubspot_mcp.research import classify_url
