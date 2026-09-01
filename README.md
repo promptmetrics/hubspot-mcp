@@ -135,8 +135,19 @@ The server **refuses to start** on any non-loopback bind without that variable
 set, or with a secret shorter than 32 characters. Binding to `127.0.0.1` without
 one is allowed for local development and warns on stderr.
 
-The token is a single shared secret for the whole deployment, so one portal per
-process — per-user OAuth and multi-tenancy are Phase 3.
+#### One portal per deployment
+
+The bearer token is a single shared secret, so an HTTP deployment serves exactly
+one HubSpot portal, and **the server refuses to start on a non-loopback bind if
+that is ambiguous** — no `HUBSPOT_PORTAL` set, a portal read from a
+`.hubspot-portal` file in the working directory, or `HUBSPOT_TOKEN_*` variables
+for more than one portal.
+
+This is enforced rather than assumed because capability gating removes tools
+from `tools/list` on the shared server object: a second portal lacking Workflows
+would unadvertise the workflow tools for the first one too, until the instance
+recycled. Run one deployment per portal. Per-user OAuth and real multi-tenancy
+are Phase 3.
 
 ## Layout
 

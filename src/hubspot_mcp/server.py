@@ -68,13 +68,24 @@ def configure_server(*, portal_id: str | None = None, mode: str = "oauth") -> No
     _SERVER_CONFIG["mode"] = mode if mode in ("oauth", "token") else "oauth"
 
 
-def _resolve_portal_id() -> str | None:
+def _resolve_portal_source() -> tuple[str | None, str]:
+    """Resolve the portal and report where it came from.
+
+    The source matters to :func:`hubspot_mcp.tenancy.enforce_single_tenant`:
+    working-directory detection is right for the local plugin and wrong for a
+    hosted deployment, where the working directory is a build artifact.
+    """
     if _SERVER_CONFIG["portal_id"]:
-        return _SERVER_CONFIG["portal_id"]
+        return _SERVER_CONFIG["portal_id"], "flag"
     env = os.getenv("HUBSPOT_PORTAL")
     if env:
-        return env
-    return detect_default_portal(os.getcwd())
+        return env, "env"
+    detected = detect_default_portal(os.getcwd())
+    return (detected, "file") if detected else (None, "none")
+
+
+def _resolve_portal_id() -> str | None:
+    return _resolve_portal_source()[0]
 
 
 def _make_provider(mode: str) -> TokenProvider:
@@ -721,6 +732,12 @@ def build_http_app(host: str = "127.0.0.1") -> Any:
     the uvicorn branch below, or the hosted deployment would serve unguarded.
     """
     from hubspot_mcp.auth.bearer_middleware import BearerAuthMiddleware, resolve_server_secret
+    from hubspot_mcp.tenancy import enforce_single_tenant
+
+    # Both checks run before the app is built, so a misconfigured deployment
+    # fails at startup rather than on its first request.
+    portal_id, source = _resolve_portal_source()
+    enforce_single_tenant(host, portal_id, source)
 
     app = mcp.streamable_http_app(host=host)
     secret = resolve_server_secret(host)
