@@ -10,10 +10,10 @@
 #
 # Allowlist: src/ tests/ bin/ hooks/ skills/ .claude-plugin/ .github/
 # scripts/check-artifact-allowlist.sh, the tracked files under docs/,
-# README.md, LICENSE, pyproject.toml, .gitignore
+# README.md, CHANGELOG.md, LICENSE, pyproject.toml, .gitignore
 set -u
 
-allow_regex='^(src/|tests/|bin/|hooks/|skills/|\.claude-plugin/|\.github/|scripts/check-artifact-allowlist\.sh$|docs/architecture\.md$|docs/phase-1-build-plan\.md$|README\.md$|LICENSE$|pyproject\.toml$|\.gitignore$)'
+allow_regex='^(src/|tests/|bin/|hooks/|skills/|\.claude-plugin/|\.github/|scripts/check-artifact-allowlist\.sh$|docs/architecture\.md$|docs/phase-1-build-plan\.md$|README\.md$|CHANGELOG\.md$|LICENSE$|pyproject\.toml$|\.gitignore$)'
 
 bad=$(git ls-files | grep -Ev "$allow_regex")
 if [ -n "$bad" ]; then

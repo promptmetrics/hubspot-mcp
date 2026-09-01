@@ -1,6 +1,6 @@
 ---
 title: "HubSpot MCP — Architecture Spec (Phase 1 & 2)"
-status: draft-for-review
+status: phase-1-shipped
 audience: dev team
 created: 2026-07-07
 owner: Izzy
@@ -12,7 +12,7 @@ owner: Izzy
 
 We are repackaging the existing `hubspot-claude` Claude Code **plugin** (44 sub-agents, ~75 tools, preview/approve/undo safety model) into a standalone **MCP server** so it can reach Claude Cowork and other hosted surfaces. We ship in phases:
 
-- **Phase 1 — Claude Code (CLI), local stdio, static token.** ~1–2 dev-days, $0. Ships real value immediately.
+- **Phase 1 — Claude Code (CLI), local stdio.** ✅ **Shipped.** Delivered on MCP protocol `2026-07-28` (see D9) with bring-your-own-app OAuth rather than the static token planned here, 79 domain tools, risk-tiered approval, pattern approval, capability gating, and the 44 charters as MCP prompts (Task 10, see D10). Static-token auth remains as the PAT fallback.
 - **Phase 2 — Same server, deployed remote HTTP, static bearer.** ~2–3 dev-days, $0 on free tier. Burns down hosting/WAF/DB/cold-start risk before we touch OAuth.
 - **Phase 3 (later, out of scope here) — Cowork:** add OAuth 2.1+PKCE provider bridge, flip transport to streamable-HTTP. ~5–10 dev-days.
 

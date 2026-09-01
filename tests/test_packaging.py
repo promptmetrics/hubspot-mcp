@@ -30,12 +30,19 @@ def test_manifests_live_where_the_loader_looks():
 
 
 def test_the_three_version_fields_agree():
-    """pyproject, plugin.json and marketplace.json are edited separately and
+    """pyproject, plugin.json, marketplace.json and __init__ are edited separately and
     drift silently; a plugin advertising one version and installing another is
     the kind of thing only a user hits."""
     pyproject = re.search(r'^version = "([^"]+)"', (REPO / "pyproject.toml").read_text(), re.M)
     assert pyproject, "pyproject has no version"
-    assert pyproject.group(1) == _plugin()["version"] == _marketplace()["plugins"][0]["version"]
+    import hubspot_mcp
+
+    assert (
+        pyproject.group(1)
+        == _plugin()["version"]
+        == _marketplace()["plugins"][0]["version"]
+        == hubspot_mcp.__version__
+    )
 
 
 def test_plugin_manifest_keeps_its_wiring():
