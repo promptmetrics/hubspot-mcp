@@ -479,7 +479,7 @@ async def hubspot_list_pending_writes(ctx: Context) -> Any:
     lf = await _safety_ctx(ctx)
     from hubspot_mcp.state import get_store
 
-    return {"pending": get_store().list_pending(lf["portal_id"])}
+    return {"pending": await get_store().list_pending(lf["portal_id"])}
 
 
 async def hubspot_list_recent_audit(ctx: Context, limit: int = 20) -> Any:
@@ -487,7 +487,7 @@ async def hubspot_list_recent_audit(ctx: Context, limit: int = 20) -> Any:
     lf = await _safety_ctx(ctx)
     from hubspot_mcp.state import get_store
 
-    return {"audit": get_store().get_recent_audits(lf["portal_id"], limit=limit)}
+    return {"audit": await get_store().get_recent_audits(lf["portal_id"], limit=limit)}
 
 
 async def hubspot_undo_write(ctx: Context, action_id: str) -> Any:
@@ -506,7 +506,7 @@ async def hubspot_undo_write(ctx: Context, action_id: str) -> Any:
 
     portal_id = lf["portal_id"]
     store = get_store()
-    snapshot = store.load_undo_snapshot(portal_id, action_id)
+    snapshot = await store.load_undo_snapshot(portal_id, action_id)
     if snapshot is None:
         raise ToolError(f"No undo snapshot for action {action_id}.")
 
@@ -519,9 +519,9 @@ async def hubspot_undo_write(ctx: Context, action_id: str) -> Any:
         # undo that did not happen.
         raise ToolError(message)
 
-    store.delete_undo_snapshot(portal_id, action_id)
+    await store.delete_undo_snapshot(portal_id, action_id)
     try:
-        store.log_write(
+        await store.log_write(
             portal_id=portal_id,
             action=f"undo:{action_id}",
             agent=(snapshot.get("metadata") or {}).get("intent_type") or "unknown",

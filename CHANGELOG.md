@@ -20,6 +20,20 @@ Groundwork for serving over HTTPS. No user-facing behaviour change on stdio.
   path cannot be honoured by a remote store, and the previous shape leaked the
   server's home directory into the tool result. Action ids are also what
   `hubspot_approve_write` / `hubspot_reject_write` actually take.
+### Phase 2 — Task 2a: `StateStore` is now asynchronous
+
+Prerequisite for a network-backed store. No user-facing behaviour change.
+
+- **Every `StateStore` method is a coroutine.** All 17 call sites already sit
+  inside `async def` handlers, so a synchronous interface would have put a Redis
+  round trip on the event loop — `execute_pending_write` alone makes up to six
+  store calls per approve.
+- **`FileStateStore` now keeps filesystem work off the loop too.** The ported
+  `persistence` module takes a directory `flock` and `fsync`s on write; Phase 1
+  offloaded two of those calls by hand and left the other fifteen inline. All of
+  them now run through `asyncio.to_thread`, and the hand-rolled offloads in
+  `handlers.py` and `safety.py` are gone — the store owns that now.
+
 ### Phase 2 — Task 3: per-request bearer auth for the HTTP transport
 
 Groundwork for serving over HTTPS. No change to the stdio path, which is still

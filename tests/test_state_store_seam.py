@@ -57,16 +57,16 @@ class RecordingStore(StateStore):
 
     # --- pending previews -------------------------------------------------
 
-    def store_pending(self, portal_id: str, action_id: str, data: dict[str, Any]) -> None:
+    async def store_pending(self, portal_id: str, action_id: str, data: dict[str, Any]) -> None:
         self._seen("store_pending")
         self.pending[(portal_id, action_id)] = dict(data)
 
-    def load_pending(self, portal_id: str, action_id: str) -> dict[str, Any] | None:
+    async def load_pending(self, portal_id: str, action_id: str) -> dict[str, Any] | None:
         self._seen("load_pending")
         found = self.pending.get((portal_id, action_id))
         return dict(found) if found is not None else None
 
-    def confirm_pending(self, portal_id: str, action_id: str, count: int) -> bool:
+    async def confirm_pending(self, portal_id: str, action_id: str, count: int) -> bool:
         self._seen("confirm_pending")
         record = self.pending.get((portal_id, action_id))
         if record is None or record.get("required_confirmation") != count:
@@ -74,17 +74,17 @@ class RecordingStore(StateStore):
         record["confirmed_count"] = count
         return True
 
-    def clear_pending(self, portal_id: str, action_id: str) -> None:
+    async def clear_pending(self, portal_id: str, action_id: str) -> None:
         self._seen("clear_pending")
         self.pending.pop((portal_id, action_id), None)
 
-    def list_pending(self, portal_id: str) -> list[str]:
+    async def list_pending(self, portal_id: str) -> list[str]:
         self._seen("list_pending")
         return [aid for (pid, aid) in self.pending if pid == portal_id]
 
     # --- undo snapshots ---------------------------------------------------
 
-    def save_undo_snapshot_for_action(self, portal_id: str, action_id: str, preview_data: dict[str, Any]) -> None:
+    async def save_undo_snapshot_for_action(self, portal_id: str, action_id: str, preview_data: dict[str, Any]) -> None:
         self._seen("save_undo_snapshot_for_action")
         self.snapshots[(portal_id, action_id)] = {
             "action_id": action_id,
@@ -92,7 +92,7 @@ class RecordingStore(StateStore):
             "metadata": {"intent_type": (preview_data.get("intent") or {}).get("intent_type")},
         }
 
-    def save_undo_snapshot(
+    async def save_undo_snapshot(
         self,
         portal_id: str,
         action_id: str,
@@ -106,23 +106,23 @@ class RecordingStore(StateStore):
             "metadata": dict(metadata or {}),
         }
 
-    def load_undo_snapshot(self, portal_id: str, action_id: str) -> dict[str, Any] | None:
+    async def load_undo_snapshot(self, portal_id: str, action_id: str) -> dict[str, Any] | None:
         self._seen("load_undo_snapshot")
         return self.snapshots.get((portal_id, action_id))
 
-    def update_undo_snapshot(self, portal_id: str, action_id: str, *, metadata: dict[str, Any] | None = None) -> None:
+    async def update_undo_snapshot(self, portal_id: str, action_id: str, *, metadata: dict[str, Any] | None = None) -> None:
         self._seen("update_undo_snapshot")
         snap = self.snapshots.get((portal_id, action_id))
         if snap is not None and metadata is not None:
             snap.setdefault("metadata", {}).update(metadata)
 
-    def delete_undo_snapshot(self, portal_id: str, action_id: str) -> None:
+    async def delete_undo_snapshot(self, portal_id: str, action_id: str) -> None:
         self._seen("delete_undo_snapshot")
         self.snapshots.pop((portal_id, action_id), None)
 
     # --- audit log --------------------------------------------------------
 
-    def log_write(
+    async def log_write(
         self,
         portal_id: str,
         *,
@@ -134,7 +134,7 @@ class RecordingStore(StateStore):
         self._seen("log_write")
         self.audits.append({"portal_id": portal_id, "action": action, "agent": agent})
 
-    def get_recent_audits(self, portal_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    async def get_recent_audits(self, portal_id: str, limit: int = 50) -> list[dict[str, Any]]:
         self._seen("get_recent_audits")
         return [a for a in reversed(self.audits) if a["portal_id"] == portal_id][:limit]
 
@@ -328,7 +328,7 @@ async def test_pattern_write_snapshot_goes_through_the_store(store, forbidden_di
 async def test_undo_reads_and_deletes_its_snapshot_through_the_store(store):
     """`hubspot_undo_write`'s snapshot handling must not be filesystem-shaped."""
     portal = _portal()
-    store.save_undo_snapshot(
+    await store.save_undo_snapshot(
         portal.portal_id,
         "act-1",
         {"1": {"firstname": "Old"}},
@@ -339,15 +339,15 @@ async def test_undo_reads_and_deletes_its_snapshot_through_the_store(store):
         return {"id": kwargs.get("object_id"), "properties": kwargs.get("properties", {})}
 
     with patch.object(handlers, "invoke_tool", fake_invoke):
-        snapshot = get_store().load_undo_snapshot(portal.portal_id, "act-1")
+        snapshot = await get_store().load_undo_snapshot(portal.portal_id, "act-1")
         assert snapshot is not None
         succeeded, _ = await handlers.undo_action(
             snapshot, portal.portal_id, portal, client=_FakeClient()
         )
 
     assert succeeded
-    get_store().delete_undo_snapshot(portal.portal_id, "act-1")
-    assert get_store().load_undo_snapshot(portal.portal_id, "act-1") is None
+    await get_store().delete_undo_snapshot(portal.portal_id, "act-1")
+    assert await get_store().load_undo_snapshot(portal.portal_id, "act-1") is None
 
 
 # --------------------------------------------------------------------------- #
@@ -355,17 +355,43 @@ async def test_undo_reads_and_deletes_its_snapshot_through_the_store(store):
 # --------------------------------------------------------------------------- #
 
 
-def test_list_pending_returns_action_ids_not_paths(tmp_path, monkeypatch):
+async def test_list_pending_returns_action_ids_not_paths(tmp_path, monkeypatch):
     """A path is meaningless to a remote store and leaks $HOME to the client."""
     monkeypatch.setattr("hubspot_mcp.persistence.CONFIG_DIR", tmp_path)
     set_store(None)
     file_store = get_store()
-    file_store.store_pending("99999999", "act-1", {"tool_name": "hubspot_update_object"})
+    await file_store.store_pending("99999999", "act-1", {"tool_name": "hubspot_update_object"})
 
-    listed = file_store.list_pending("99999999")
+    listed = await file_store.list_pending("99999999")
 
     assert listed == ["act-1"]
     assert all(isinstance(entry, str) for entry in listed)
+
+
+def test_every_interface_method_is_a_coroutine():
+    """A synchronous method would put a network round trip on the event loop.
+
+    All 17 call sites are inside `async def` handlers, and
+    `execute_pending_write` alone makes up to six store calls per approve.
+    """
+    sync = [
+        name
+        for name, member in vars(StateStore).items()
+        if getattr(member, "__isabstractmethod__", False)
+        and not inspect.iscoroutinefunction(member)
+    ]
+    assert sync == [], f"StateStore methods that would block the loop: {sync}"
+
+
+def test_the_file_store_keeps_blocking_io_off_the_loop():
+    """`persistence` takes a directory flock and fsyncs; that cannot run inline."""
+    for name, member in vars(FileStateStore).items():
+        if name.startswith("_"):
+            continue
+        assert inspect.iscoroutinefunction(member), f"FileStateStore.{name} is not a coroutine"
+        assert "to_thread" in inspect.getsource(member), (
+            f"FileStateStore.{name} runs filesystem work on the event loop"
+        )
 
 
 def test_interface_exposes_no_filesystem_types():
