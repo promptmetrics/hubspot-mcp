@@ -186,13 +186,20 @@ async def exchange_code_for_token(
     return body
 
 
-async def refresh_access_token(portal_id: str, refresh_token: str) -> dict[str, Any]:
+async def refresh_tokens_only(refresh_token: str) -> dict[str, Any]:
+    """Exchange a refresh token for a new grant, persisting nothing.
+
+    The network half of :func:`refresh_access_token`. Split out because the
+    hosted path stores tokens per user in the connection store, not in the
+    local portal file — but both must use one endpoint, one payload and one
+    404-fallback rule, so there is only ever one thing to get right.
+    """
     client_id = get_client_id()
     client_secret = get_client_secret()
     if not client_id or not client_secret:
         raise ValueError("HubSpot app credentials not found.")
 
-    body = await _post_token_request(
+    return await _post_token_request(
         {
             "grant_type": "refresh_token",
             "client_id": client_id,
@@ -200,6 +207,10 @@ async def refresh_access_token(portal_id: str, refresh_token: str) -> dict[str, 
             "refresh_token": refresh_token,
         }
     )
+
+
+async def refresh_access_token(portal_id: str, refresh_token: str) -> dict[str, Any]:
+    body = await refresh_tokens_only(refresh_token)
 
     _save_oauth_tokens(
         portal_id=portal_id,
