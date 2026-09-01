@@ -10,6 +10,12 @@ interface, not the filesystem layout.
 The interface is ``portal_id``-based throughout; the file-store adapter
 translates to the ``snapshot_dir``-based signatures of the ported
 ``snapshot`` module so callers never deal with paths.
+
+**Every method is a coroutine**, including on the file store. All 17 call
+sites live inside ``async def`` handlers, so a synchronous interface would put
+a network round trip on the event loop — ``execute_pending_write`` alone makes
+up to six store calls per approve. Awaiting them costs the file store one
+thread hop and buys the remote store the right to be slow.
 """
 from __future__ import annotations
 
@@ -23,23 +29,23 @@ class StateStore(ABC):
     # --- pending previews -------------------------------------------------
 
     @abstractmethod
-    def store_pending(self, portal_id: str, action_id: str, data: dict[str, Any]) -> None:
+    async def store_pending(self, portal_id: str, action_id: str, data: dict[str, Any]) -> None:
         """Persist a pending write preview under ``action_id``."""
 
     @abstractmethod
-    def load_pending(self, portal_id: str, action_id: str) -> dict[str, Any] | None:
+    async def load_pending(self, portal_id: str, action_id: str) -> dict[str, Any] | None:
         """Return a pending preview, or ``None`` if not found / expired."""
 
     @abstractmethod
-    def confirm_pending(self, portal_id: str, action_id: str, count: int) -> bool:
+    async def confirm_pending(self, portal_id: str, action_id: str, count: int) -> bool:
         """Record a confirmation count; return ``True`` if it matches the impact."""
 
     @abstractmethod
-    def clear_pending(self, portal_id: str, action_id: str) -> None:
+    async def clear_pending(self, portal_id: str, action_id: str) -> None:
         """Remove a pending preview (after approve/reject/expire)."""
 
     @abstractmethod
-    def list_pending(self, portal_id: str) -> list[str]:
+    async def list_pending(self, portal_id: str) -> list[str]:
         """Return the portal's pending ``action_id``s, newest first.
 
         Action ids, not paths: a path is meaningless to a remote store and
@@ -49,11 +55,11 @@ class StateStore(ABC):
     # --- undo snapshots ---------------------------------------------------
 
     @abstractmethod
-    def save_undo_snapshot_for_action(self, portal_id: str, action_id: str, preview_data: dict[str, Any]) -> None:
+    async def save_undo_snapshot_for_action(self, portal_id: str, action_id: str, preview_data: dict[str, Any]) -> None:
         """Capture an undo snapshot for a pending write (FR-17/18)."""
 
     @abstractmethod
-    def save_undo_snapshot(
+    async def save_undo_snapshot(
         self,
         portal_id: str,
         action_id: str,
@@ -69,23 +75,23 @@ class StateStore(ABC):
         """
 
     @abstractmethod
-    def load_undo_snapshot(self, portal_id: str, action_id: str) -> dict[str, Any] | None:
+    async def load_undo_snapshot(self, portal_id: str, action_id: str) -> dict[str, Any] | None:
         """Return a saved undo snapshot, or ``None``."""
 
     @abstractmethod
-    def update_undo_snapshot(self, portal_id: str, action_id: str, *, metadata: dict[str, Any] | None = None) -> None:
+    async def update_undo_snapshot(self, portal_id: str, action_id: str, *, metadata: dict[str, Any] | None = None) -> None:
         """Update snapshot metadata (e.g. record ``created_ids`` post-create)."""
 
     @abstractmethod
-    def delete_undo_snapshot(self, portal_id: str, action_id: str) -> None:
+    async def delete_undo_snapshot(self, portal_id: str, action_id: str) -> None:
         """Remove an undo snapshot."""
 
     # --- audit log --------------------------------------------------------
 
     @abstractmethod
-    def log_write(self, portal_id: str, *, action: str, agent: str, result_summary: dict[str, Any], informing_sources: list[dict[str, Any]] | None = None) -> None:
+    async def log_write(self, portal_id: str, *, action: str, agent: str, result_summary: dict[str, Any], informing_sources: list[dict[str, Any]] | None = None) -> None:
         """Append a write-audit record (FR-17)."""
 
     @abstractmethod
-    def get_recent_audits(self, portal_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    async def get_recent_audits(self, portal_id: str, limit: int = 50) -> list[dict[str, Any]]:
         """Return the most recent ``limit`` audit entries (newest first)."""

@@ -9,7 +9,6 @@ on-disk pending record.
 """
 from __future__ import annotations
 
-import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -214,13 +213,7 @@ async def apply_write(
         over_threshold = pattern_confirm_threshold is not None and count > pattern_confirm_threshold
         preview_data["required_confirmation"] = count if over_threshold else 0
         preview_data["approval_tier"] = "FULL_GATE" if over_threshold else "CONFIRM"
-    # Offload the blocking flock+fsync to a worker thread so concurrent daemon
-    # RPCs don't stall the event loop (#6).  The CLI sync path wraps this in
-    # _run_async and is unaffected; the flock still serializes cross-process
-    # writes — it just no longer runs on the asyncio loop.
-    await asyncio.to_thread(
-        get_store().store_pending, portal_config.portal_id, action_id, preview_data
-    )
+    await get_store().store_pending(portal_config.portal_id, action_id, preview_data)
 
     return ApplyWriteResult(
         preview=preview,

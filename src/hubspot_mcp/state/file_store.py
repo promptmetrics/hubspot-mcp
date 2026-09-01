@@ -1,4 +1,4 @@
-"""File-backed :class:`StateStore` — Phase 1 default.
+"""File-backed :class:`StateStore` — the local/stdio default.
 
 Thin adapter over the ported ``persistence``, ``snapshot``, and ``audit``
 modules, presenting their filesystem operations as the ``portal_id``-based
@@ -7,12 +7,15 @@ the ported ``snapshot`` module takes a ``snapshot_dir`` argument, so this
 adapter resolves it via :func:`snapshot_dir_for_portal` and hides it from
 callers.
 
-This is the seam for Phase 2: swapping in ``RedisStateStore`` means
-implementing the same methods against Redis, with no handler or tool-body
-changes (they depend on :class:`StateStore`).
+Every method runs its filesystem work through :func:`asyncio.to_thread`. The
+ported modules take a directory ``flock`` and ``fsync`` on write, which is
+exactly the kind of blocking call that should not sit on the event loop while
+concurrent tool calls are in flight — Phase 1 offloaded two of these by hand
+and left the rest inline.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from hubspot_mcp import audit, persistence, snapshot
@@ -24,58 +27,87 @@ class FileStateStore(StateStore):
 
     # --- pending previews -------------------------------------------------
 
-    def store_pending(self, portal_id: str, action_id: str, data: dict[str, Any]) -> None:
-        persistence.store(portal_id, action_id, data)
+    async def store_pending(self, portal_id: str, action_id: str, data: dict[str, Any]) -> None:
+        await asyncio.to_thread(persistence.store, portal_id, action_id, data)
 
-    def load_pending(self, portal_id: str, action_id: str) -> dict[str, Any] | None:
-        return persistence.load(portal_id, action_id)
+    async def load_pending(self, portal_id: str, action_id: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(persistence.load, portal_id, action_id)
 
-    def confirm_pending(self, portal_id: str, action_id: str, count: int) -> bool:
-        return persistence.confirm(portal_id, action_id, count)
+    async def confirm_pending(self, portal_id: str, action_id: str, count: int) -> bool:
+        return await asyncio.to_thread(persistence.confirm, portal_id, action_id, count)
 
-    def clear_pending(self, portal_id: str, action_id: str) -> None:
-        persistence.clear(portal_id, action_id)
+    async def clear_pending(self, portal_id: str, action_id: str) -> None:
+        await asyncio.to_thread(persistence.clear, portal_id, action_id)
 
-    def list_pending(self, portal_id: str) -> list[str]:
+    async def list_pending(self, portal_id: str) -> list[str]:
         # ``persistence`` is filesystem-shaped and returns paths; the action id
         # is the filename stem.  Ordering (newest first) is preserved.
-        return [p.stem for p in persistence.list_pending(portal_id)]
+        paths = await asyncio.to_thread(persistence.list_pending, portal_id)
+        return [p.stem for p in paths]
 
     # --- undo snapshots ---------------------------------------------------
 
-    def save_undo_snapshot_for_action(self, portal_id: str, action_id: str, preview_data: dict[str, Any]) -> None:
-        snapshot.save_undo_snapshot_for_action(portal_id, action_id, preview_data)
+    async def save_undo_snapshot_for_action(
+        self, portal_id: str, action_id: str, preview_data: dict[str, Any]
+    ) -> None:
+        await asyncio.to_thread(snapshot.save_undo_snapshot_for_action, portal_id, action_id, preview_data)
 
-    def save_undo_snapshot(
+    async def save_undo_snapshot(
         self,
         portal_id: str,
         action_id: str,
         original_values: dict[str, Any],
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        snapshot.save_undo_snapshot(
-            snapshot.snapshot_dir_for_portal(portal_id), action_id, original_values, metadata=metadata
+        await asyncio.to_thread(
+            snapshot.save_undo_snapshot,
+            snapshot.snapshot_dir_for_portal(portal_id),
+            action_id,
+            original_values,
+            metadata,
         )
 
-    def load_undo_snapshot(self, portal_id: str, action_id: str) -> dict[str, Any] | None:
-        return snapshot.load_undo_snapshot(snapshot.snapshot_dir_for_portal(portal_id), action_id)
+    async def load_undo_snapshot(self, portal_id: str, action_id: str) -> dict[str, Any] | None:
+        return await asyncio.to_thread(
+            snapshot.load_undo_snapshot, snapshot.snapshot_dir_for_portal(portal_id), action_id
+        )
 
-    def update_undo_snapshot(self, portal_id: str, action_id: str, *, metadata: dict[str, Any] | None = None) -> None:
-        snapshot.update_undo_snapshot(snapshot.snapshot_dir_for_portal(portal_id), action_id, metadata=metadata)
+    async def update_undo_snapshot(
+        self, portal_id: str, action_id: str, *, metadata: dict[str, Any] | None = None
+    ) -> None:
+        await asyncio.to_thread(
+            snapshot.update_undo_snapshot,
+            snapshot.snapshot_dir_for_portal(portal_id),
+            action_id,
+            None,
+            metadata,
+        )
 
-    def delete_undo_snapshot(self, portal_id: str, action_id: str) -> None:
-        snapshot.delete_undo_snapshot(snapshot.snapshot_dir_for_portal(portal_id), action_id)
+    async def delete_undo_snapshot(self, portal_id: str, action_id: str) -> None:
+        await asyncio.to_thread(
+            snapshot.delete_undo_snapshot, snapshot.snapshot_dir_for_portal(portal_id), action_id
+        )
 
     # --- audit log --------------------------------------------------------
 
-    def log_write(self, portal_id: str, *, action: str, agent: str, result_summary: dict[str, Any], informing_sources: list[dict[str, Any]] | None = None) -> None:
-        audit.log_write(
-            portal_id=portal_id,
-            action=action,
-            agent=agent,
-            result_summary=result_summary,
-            informing_sources=informing_sources,
+    async def log_write(
+        self,
+        portal_id: str,
+        *,
+        action: str,
+        agent: str,
+        result_summary: dict[str, Any],
+        informing_sources: list[dict[str, Any]] | None = None,
+    ) -> None:
+        await asyncio.to_thread(
+            lambda: audit.log_write(
+                portal_id=portal_id,
+                action=action,
+                agent=agent,
+                result_summary=result_summary,
+                informing_sources=informing_sources,
+            )
         )
 
-    def get_recent_audits(self, portal_id: str, limit: int = 50) -> list[dict[str, Any]]:
-        return audit.get_recent_audits(portal_id, limit=limit)
+    async def get_recent_audits(self, portal_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(lambda: audit.get_recent_audits(portal_id, limit=limit))
