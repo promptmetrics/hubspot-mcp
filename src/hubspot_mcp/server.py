@@ -700,6 +700,35 @@ _register_all_tools()
 _register_agent_prompts()
 
 
+@mcp.custom_route("/healthz", methods=["GET"])
+async def healthz(request: Any) -> Any:
+    """Liveness probe. Public by design — reports nothing about the portal.
+
+    Deliberately does not touch HubSpot or the state store: a health check that
+    depends on a third party takes the deployment down when that third party
+    has a bad minute.
+    """
+    from starlette.responses import JSONResponse
+
+    return JSONResponse({"status": "ok", "version": __version__})
+
+
+def build_http_app(host: str = "127.0.0.1") -> Any:
+    """Return the Streamable HTTP ASGI app, guarded by per-request bearer auth.
+
+    This is also the Vercel entrypoint: the platform imports the ASGI app rather
+    than calling :func:`run`, so the auth wrapper has to live here and not in
+    the uvicorn branch below, or the hosted deployment would serve unguarded.
+    """
+    from hubspot_mcp.auth.bearer_middleware import BearerAuthMiddleware, resolve_server_secret
+
+    app = mcp.streamable_http_app(host=host)
+    secret = resolve_server_secret(host)
+    if secret is None:
+        return app
+    return BearerAuthMiddleware(app, secret=secret)
+
+
 def run(transport: str = "stdio", *, host: str | None = None, port: int | None = None) -> None:
     """Run the MCP server over ``stdio`` (default) or Streamable HTTP.
 
@@ -708,6 +737,16 @@ def run(transport: str = "stdio", *, host: str | None = None, port: int | None =
     offered here.
     """
     if transport in ("http", "streamable-http"):
-        mcp.run(transport="streamable-http", host=host or "127.0.0.1", port=port or 8000)
+        import uvicorn
+
+        bind = host or "127.0.0.1"
+        # Not ``mcp.run(transport="streamable-http")``: that builds and serves
+        # the app in one call, leaving no seam to wrap it in auth.
+        uvicorn.run(
+            build_http_app(bind),
+            host=bind,
+            port=port or 8000,
+            log_level=mcp.settings.log_level.lower(),
+        )
     else:
         mcp.run(transport="stdio")

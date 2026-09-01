@@ -20,6 +20,27 @@ Groundwork for serving over HTTPS. No user-facing behaviour change on stdio.
   path cannot be honoured by a remote store, and the previous shape leaked the
   server's home directory into the tool result. Action ids are also what
   `hubspot_approve_write` / `hubspot_reject_write` actually take.
+### Phase 2 — Task 3: per-request bearer auth for the HTTP transport
+
+Groundwork for serving over HTTPS. No change to the stdio path, which is still
+the default and still needs no authentication — the transport is a pipe to a
+process you started.
+
+- **`Authorization: Bearer <secret>` is now required on every HTTP request.**
+  Protocol `2026-07-28` removed the handshake, so there is no connection setup
+  to authenticate in and no session to carry a decision forward; anything
+  checked once per connection would authorise the rest of it for free.
+- **The server fails closed.** Binding to anything but loopback without
+  `HUBSPOT_MCP_SERVER_SECRET` set, or with a secret under 32 characters, refuses
+  to start. A guessable secret on a public endpoint is worse than no secret,
+  because it looks protected. A loopback bind without one still works for local
+  development, with a warning.
+- **Added `GET /healthz`** — public by design, reports version and nothing about
+  the portal, and deliberately touches neither HubSpot nor the state store so a
+  third party having a bad minute cannot take the deployment down.
+- Missing, malformed and wrong tokens return one identical 401 with
+  `WWW-Authenticate: Bearer`. The comparison is against a SHA-256 digest, so it
+  leaks neither content nor the secret's length.
 
 ## 0.2.0 — 2026-09-01
 
