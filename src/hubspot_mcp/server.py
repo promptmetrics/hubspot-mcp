@@ -153,7 +153,7 @@ async def _probe_capabilities(portal_config: PortalConfig):
         matrix = await probe_portal(portal_config)
     except Exception:  # noqa: BLE001 — an unreachable portal must not stop the server
         return None, False
-    return matrix, probe_was_conclusive(portal_config.portal_id)
+    return matrix, await probe_was_conclusive(portal_config.portal_id)
 
 
 def _unadvertise_unavailable_tools(matrix) -> None:

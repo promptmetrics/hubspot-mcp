@@ -14,6 +14,7 @@ from hubspot_mcp.capabilities import (
 )
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.config import PortalConfig
+from hubspot_mcp.state.cache_store import get_cache_store, set_cache_store
 
 
 def test_capability_matrix_defaults():
@@ -82,59 +83,69 @@ def test_capability_explanation_unknown():
 
 
 # ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _isolated_cache(tmp_path, monkeypatch):
+    """Root the cache at tmp_path. Replaces the old `base_dir=` injection."""
+    monkeypatch.setattr("hubspot_mcp.config.CONFIG_DIR", tmp_path)
+    set_cache_store(None)
+    yield
+    set_cache_store(None)
+
+
 # Cache tests
 # ---------------------------------------------------------------------------
 
 
-def test_cache_get_set(tmp_path):
-    cache = CapabilityCache("123", base_dir=tmp_path)
+async def test_cache_get_set(tmp_path):
+    cache = CapabilityCache("123")
     m = CapabilityMatrix(workflows=True)
-    cache.set(m)
-    retrieved = cache.get()
+    await cache.set(m)
+    retrieved = await cache.get()
     assert retrieved is not None
     assert retrieved.workflows is True
 
 
-def test_cache_miss(tmp_path):
-    cache = CapabilityCache("123", base_dir=tmp_path)
-    assert cache.get() is None
+async def test_cache_miss(tmp_path):
+    cache = CapabilityCache("123")
+    assert await cache.get() is None
 
 
-def test_cache_ttl_expiration(tmp_path, monkeypatch):
-    cache = CapabilityCache("123", base_dir=tmp_path)
-    cache.set(CapabilityMatrix(workflows=True))
+async def test_cache_ttl_expiration(tmp_path, monkeypatch):
+    cache = CapabilityCache("123")
+    await cache.set(CapabilityMatrix(workflows=True))
     fixed_time = time.time() + 90000
     monkeypatch.setattr(time, "time", lambda: fixed_time)
-    assert cache.get() is None
+    assert await cache.get() is None
 
 
-def test_cache_invalidate(tmp_path):
-    cache = CapabilityCache("123", base_dir=tmp_path)
-    cache.set(CapabilityMatrix(workflows=True))
-    cache.invalidate()
-    assert cache.get() is None
-    assert not cache.cache_file.exists()
+async def test_cache_invalidate(tmp_path):
+    cache = CapabilityCache("123")
+    await cache.set(CapabilityMatrix(workflows=True))
+    await cache.invalidate()
+    assert await cache.get() is None
+    assert await get_cache_store().get("123", CapabilityCache.NAME) is None
 
 
-def test_cache_persists_to_disk(tmp_path):
-    cache = CapabilityCache("123", base_dir=tmp_path)
-    cache.set(CapabilityMatrix(workflows=True, users=True))
+async def test_cache_persists_to_disk(tmp_path):
+    cache = CapabilityCache("123")
+    await cache.set(CapabilityMatrix(workflows=True, users=True))
 
-    cache2 = CapabilityCache("123", base_dir=tmp_path)
-    retrieved = cache2.get()
+    cache2 = CapabilityCache("123")
+    retrieved = await cache2.get()
     assert retrieved is not None
     assert retrieved.workflows is True
     assert retrieved.users is True
 
 
-def test_cache_file_structure(tmp_path):
-    cache = CapabilityCache("123", base_dir=tmp_path)
-    cache.set(CapabilityMatrix(workflows=True))
-    data = json.loads(cache.cache_file.read_text())
-    assert "matrix" in data
-    assert "_timestamp" in data["matrix"]
-    assert "data" in data["matrix"]
-    assert data["matrix"]["data"]["workflows"] is True
+async def test_cache_stores_the_matrix_payload(tmp_path):
+    """The store owns expiry now; the cached value is the matrix itself."""
+    cache = CapabilityCache("123")
+    await cache.set(CapabilityMatrix(workflows=True))
+    assert (await get_cache_store().get("123", CapabilityCache.NAME))["workflows"] is True
+
+    on_disk = json.loads((tmp_path / "123" / "capabilities.json").read_text())
+    assert on_disk["_expires_at"] > time.time()
+    assert on_disk["data"]["workflows"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -144,12 +155,8 @@ def test_cache_file_structure(tmp_path):
 
 @pytest.mark.asyncio
 async def test_probe_portal_uses_cache(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "hubspot_mcp.capabilities.CapabilityCache",
-        lambda portal_id, base_dir=None: CapabilityCache(portal_id, base_dir=tmp_path),
-    )
-    cache = CapabilityCache("123", base_dir=tmp_path)
-    cache.set(CapabilityMatrix(workflows=True))
+    cache = CapabilityCache("123")
+    await cache.set(CapabilityMatrix(workflows=True))
 
     portal = PortalConfig(portal_id="123", token="test-token")
     result = await probe_portal(portal)
@@ -158,10 +165,6 @@ async def test_probe_portal_uses_cache(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_probe_portal_detects_tier(respx_mock, monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "hubspot_mcp.capabilities.CapabilityCache",
-        lambda portal_id, base_dir=None: CapabilityCache(portal_id, base_dir=tmp_path),
-    )
     client = HubSpotClient(PortalConfig(portal_id="123", token="test-token"))
     respx_mock.get("https://api.hubapi.com/account-info/v3/details").mock(
         return_value=httpx.Response(200, json={"tier": "Enterprise"})
@@ -188,10 +191,6 @@ async def test_probe_portal_detects_tier(respx_mock, monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_probe_portal_detects_custom_objects(respx_mock, monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "hubspot_mcp.capabilities.CapabilityCache",
-        lambda portal_id, base_dir=None: CapabilityCache(portal_id, base_dir=tmp_path),
-    )
     respx_mock.get("https://api.hubapi.com/account-info/v3/details").mock(
         return_value=httpx.Response(200, json={})
     )
@@ -217,10 +216,6 @@ async def test_probe_portal_detects_custom_objects(respx_mock, monkeypatch, tmp_
 
 @pytest.mark.asyncio
 async def test_probe_portal_detects_calculated_properties(respx_mock, monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "hubspot_mcp.capabilities.CapabilityCache",
-        lambda portal_id, base_dir=None: CapabilityCache(portal_id, base_dir=tmp_path),
-    )
     respx_mock.get("https://api.hubapi.com/account-info/v3/details").mock(
         return_value=httpx.Response(200, json={})
     )
@@ -252,10 +247,6 @@ async def test_probe_portal_detects_calculated_properties(respx_mock, monkeypatc
 
 @pytest.mark.asyncio
 async def test_probe_portal_caches_result(respx_mock, monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "hubspot_mcp.capabilities.CapabilityCache",
-        lambda portal_id, base_dir=None: CapabilityCache(portal_id, base_dir=tmp_path),
-    )
     respx_mock.get("https://api.hubapi.com/account-info/v3/details").mock(
         return_value=httpx.Response(200, json={"tier": "Professional"})
     )
@@ -287,8 +278,8 @@ async def test_probe_portal_caches_result(respx_mock, monkeypatch, tmp_path):
     result = await probe_portal(portal)
     assert result.workflows is True
 
-    cache = CapabilityCache("123", base_dir=tmp_path)
-    cached = cache.get()
+    cache = CapabilityCache("123")
+    cached = await cache.get()
     assert cached is not None
     assert cached.workflows is True
     assert cached.users is True
@@ -296,10 +287,6 @@ async def test_probe_portal_caches_result(respx_mock, monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_probe_portal_handles_all_failures(respx_mock, monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "hubspot_mcp.capabilities.CapabilityCache",
-        lambda portal_id, base_dir=None: CapabilityCache(portal_id, base_dir=tmp_path),
-    )
     respx_mock.get("https://api.hubapi.com/account-info/v3/details").mock(
         return_value=httpx.Response(500, text="Internal Server Error")
     )
@@ -360,10 +347,6 @@ def _mock_all_probes_ok(respx_mock, *, flows=None):
 
 @pytest.mark.asyncio
 async def test_workflows_probe_hits_flows_endpoint(respx_mock, monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "hubspot_mcp.capabilities.CapabilityCache",
-        lambda portal_id, base_dir=None: CapabilityCache(portal_id, base_dir=tmp_path),
-    )
     _mock_all_probes_ok(respx_mock)
     result = await probe_portal(PortalConfig(portal_id="123", token="test-token"))
     assert result.workflows is True
@@ -373,29 +356,21 @@ async def test_workflows_probe_hits_flows_endpoint(respx_mock, monkeypatch, tmp_
 
 @pytest.mark.asyncio
 async def test_probe_404_caches_false(respx_mock, monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "hubspot_mcp.capabilities.CapabilityCache",
-        lambda portal_id, base_dir=None: CapabilityCache(portal_id, base_dir=tmp_path),
-    )
     _mock_all_probes_ok(respx_mock, flows=httpx.Response(404, json={"message": "not found"}))
     result = await probe_portal(PortalConfig(portal_id="123", token="test-token"))
     assert result.workflows is False
-    cached = CapabilityCache("123", base_dir=tmp_path).get()
+    cached = await CapabilityCache("123").get()
     assert cached is not None and cached.workflows is False
 
 
 @pytest.mark.asyncio
 async def test_probe_5xx_does_not_cache_and_reprobes(respx_mock, monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "hubspot_mcp.capabilities.CapabilityCache",
-        lambda portal_id, base_dir=None: CapabilityCache(portal_id, base_dir=tmp_path),
-    )
     _mock_all_probes_ok(respx_mock, flows=httpx.Response(503, text="Service Unavailable"))
     portal = PortalConfig(portal_id="123", token="test-token")
 
     result = await probe_portal(portal)
     assert result.workflows is False  # safe default, but...
-    assert CapabilityCache("123", base_dir=tmp_path).get() is None  # ...not cached
+    assert await CapabilityCache("123").get() is None  # ...not cached
 
     # A second call re-probes instead of serving a poisoned matrix.
     await probe_portal(portal)

@@ -90,7 +90,7 @@ per-request `tools/list` filter.
 | 1 | ✅ **Done.** **Route persistence through `StateStore`.** Introduce a module-level `get_store()` returning the configured implementation; convert the ~28 direct call sites in `handlers.py`, `snapshot.py`, `safety.py`, `server.py`. Behaviour-identical — `FileStateStore` stays the default and the 628 tests must pass untouched. | — | 0.75d |
 | 2 | ✅ **Done** (as 2a + 2b). **`RedisStateStore`.** Implement all 11 methods against Upstash (or Vercel's Redis integration). Pending previews and snapshots are Fernet-encrypted blobs keyed by `portal_id:action_id`; audit is an append-only list. Port `FileStateStore`'s tests against it via a shared conformance suite so both implementations are held to one contract. | 1 | 0.75d |
 | 3 | ✅ **Done** (with a correction, below). **Per-request bearer auth.** `SERVER_SECRET` from env, constant-time compare, wired through the SDK's `token_verifier` rather than middleware — there is no handshake to authenticate in. `auth/bearer_middleware.py` already documents this; replace the stub. | — | 0.25d |
-| 4 | **Move the remaining local-disk state.** Schema cache, capability cache and docs index are per-instance today; on Vercel each cold instance rebuilds them (the docs index costs ~40 fetches). Move to Redis with the same TTLs. | 1, 2 | 0.35d |
+| 4 | ✅ **Done** (2 of 3 caches — see below). **Move the remaining local-disk state.** Schema cache, capability cache and docs index are per-instance today; on Vercel each cold instance rebuilds them (the docs index costs ~40 fetches). Move to Redis with the same TTLs. | 1, 2 | 0.35d |
 | 5 | **Single-tenant guard.** Refuse to start when the deployment cannot resolve exactly one portal; add a startup assertion and a test. Document the boundary in the README. | — | 0.15d |
 | 6 | **Vercel deployment.** `vercel.json` with the FastAPI entrypoint and `maxDuration`; `streamable_http_app()` mounted; env vars for `HUBSPOT_MCP_SERVER_SECRET`, HubSpot credentials, Redis URL. (`/healthz` landed with Task 3.) Preview deployment per PR. | 2, 3 | 0.4d |
 | 7 | **Ops documentation.** Update `docs/architecture.md` §4 and D7→D11; document the WAF gotcha — if anything sits in front of the endpoint, allowlist Anthropic's MCP egress `160.79.104.0/21` on `/mcp` and `/healthz`, since WAF bot-blocking is the most common "cannot reach MCP server" cause. | 6 | 0.2d |
@@ -185,6 +185,39 @@ Two things the plan did not call for and should have:
 - **Encryption is not optional.** Previews and snapshots carry contact names,
   emails and deal amounts into a third party's database. The store refuses to
   start without `HUBSPOT_MCP_STATE_KEY`.
+
+---
+
+### Task 4 outcome — two caches moved, one deliberately not
+
+The row asked for schema cache, capability cache and docs index. Two moved; the
+**schema cache did not**, and that is a decision rather than an omission.
+
+Every writer of `SchemaCache` is async, but its *readers* are not:
+`validation.py`, `tools/objects.py`, `agent_routing.py` and the agent prompt
+builders all read it from synchronous code, and the prompt builders are called
+synchronously from `prompts/list`. Making it async means rewriting the
+validation and prompt layers — which §5 of this plan names as the signal that a
+seam is in the wrong place.
+
+The cost of leaving it per-instance is bounded: a cold instance re-warms the
+standard schemas in `app_lifespan`, the same work a fresh stdio session already
+does. If it ever matters, hydrate from the shared cache in the lifespan and push
+back on write, keeping the synchronous reader interface. Compare the two that
+did move:
+
+- **Capability matrix** — not primarily about the five probe calls.
+  `_unadvertise_unavailable_tools` removes tools from `tools/list` based on this
+  matrix, so two instances that probed independently (one cleanly, one through a
+  transient 5xx) would advertise **different tool lists for the same portal**.
+- **Docs index** — ~40 outbound fetches and ~5.5s on a cold build, and it is
+  HubSpot's public documentation, identical for every portal. Now built once per
+  deployment.
+
+The task also added a **second interface rather than four more `StateStore`
+methods**, because the two need opposite failure behaviour: a state backend
+failure must surface, a cache backend failure must read as a miss. Encoding that
+in the type is what stops the next person getting it wrong.
 
 ---
 

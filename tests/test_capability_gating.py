@@ -58,13 +58,18 @@ def test_ungated_tools_are_never_blocked():
 class TestConclusiveness:
     """A transient probe failure must not be mistaken for 'not entitled'."""
 
-    def test_transient_failure_is_not_conclusive(self, tmp_path, monkeypatch):
+    async def test_transient_failure_is_not_conclusive(self, tmp_path, monkeypatch):
         from hubspot_mcp import capabilities
+        from hubspot_mcp.state.cache_store import set_cache_store
 
-        monkeypatch.setattr(capabilities.Path, "home", lambda: tmp_path)
-        # Nothing cached: probe_portal only writes the cache when every probe
-        # returned a definitive answer.
-        assert capabilities.probe_was_conclusive("99999999") is False
+        monkeypatch.setattr("hubspot_mcp.config.CONFIG_DIR", tmp_path)
+        set_cache_store(None)
+        try:
+            # Nothing cached: probe_portal only writes the cache when every
+            # probe returned a definitive answer.
+            assert await capabilities.probe_was_conclusive("99999999") is False
+        finally:
+            set_cache_store(None)
 
     def test_defaults_would_hide_tools_if_treated_as_truth(self):
         """Documents exactly what the conclusiveness gate protects against."""

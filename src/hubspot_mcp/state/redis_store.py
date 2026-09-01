@@ -22,18 +22,20 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from datetime import UTC, datetime
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 from redis.asyncio import Redis
-from redis.exceptions import WatchError
+from redis.exceptions import RedisError, WatchError
 
 from hubspot_mcp.persistence import is_valid_action_id
 from hubspot_mcp.redaction import redact_dict_for_disk
 from hubspot_mcp.snapshot import build_undo_snapshot
 from hubspot_mcp.state.base import StateStore
+from hubspot_mcp.state.cache_store import CacheStore
 
 # `redis` and `cryptography` are the `[redis]` extra, not core dependencies.
 # Nothing imports this module unless the Redis backend is selected, so the
@@ -291,3 +293,58 @@ class RedisStateStore(StateStore):
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+class RedisCacheStore(CacheStore):
+    """Redis-backed :class:`CacheStore`.
+
+    Shares the Redis connection model and encryption of :class:`RedisStateStore`
+    but **not** its error handling. A cache is an optimisation: if Redis is
+    unreachable, a read must report a miss so the caller refetches from HubSpot,
+    and a write must be dropped with a note on stderr. Raising here would turn a
+    Redis blip into failed tool calls that had a perfectly good fallback.
+    """
+
+    def __init__(self, client: Redis, *, encryption_key: str | None = None) -> None:
+        self._redis = client
+        self._cipher = _fernet(encryption_key)
+
+    @classmethod
+    def from_url(cls, url: str | None = None, **kwargs: Any) -> RedisCacheStore:
+        resolved = url or os.environ.get(URL_ENV, "")
+        if not resolved:
+            raise RuntimeError(f"{URL_ENV} is not set; cannot build a RedisCacheStore.")
+        return cls(Redis.from_url(resolved, decode_responses=False), **kwargs)
+
+    def _key(self, scope: str | None, name: str) -> str:
+        return f"{_NAMESPACE}:cache:{scope or '_global'}:{name}"
+
+    async def get(self, scope: str | None, name: str) -> dict[str, Any] | None:
+        try:
+            raw = await self._redis.get(self._key(scope, name))
+        except RedisError as exc:
+            print(f"hubspot_mcp: cache read failed for {name}: {exc}", file=sys.stderr)
+            return None
+        if raw is None:
+            return None
+        try:
+            return json.loads(self._cipher.decrypt(raw))
+        except (InvalidToken, ValueError):
+            # A rotated key or a corrupt value: a miss, and the caller refetches.
+            return None
+
+    async def set(self, scope: str | None, name: str, value: dict[str, Any], *, ttl_seconds: int) -> None:
+        try:
+            await self._redis.set(
+                self._key(scope, name),
+                self._cipher.encrypt(json.dumps(value).encode()),
+                ex=ttl_seconds,
+            )
+        except RedisError as exc:
+            print(f"hubspot_mcp: cache write failed for {name}: {exc}", file=sys.stderr)
+
+    async def delete(self, scope: str | None, name: str) -> None:
+        try:
+            await self._redis.delete(self._key(scope, name))
+        except RedisError as exc:
+            print(f"hubspot_mcp: cache delete failed for {name}: {exc}", file=sys.stderr)

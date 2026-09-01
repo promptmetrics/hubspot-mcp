@@ -130,7 +130,8 @@ async def test_stale_cache_is_rebuilt(isolated_cache):
     await load_index()
     cache = isolated_cache / "docs_index.json"
     payload = json.loads(cache.read_text())
-    payload["_fetched_at"] = time.time() - (25 * 60 * 60)
+    # Expiry is the cache store's business now, not a field inside the value.
+    payload["_expires_at"] = time.time() - 1
     cache.write_text(json.dumps(payload))
 
     before = respx.mock.calls.call_count
