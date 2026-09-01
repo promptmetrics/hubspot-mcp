@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Phase 3 — stage 1: the per-request session seam
+
+Groundwork for per-user OAuth. No behaviour change on any existing path.
+
+- **`server._session(ctx)` now decides whose portal a request acts on.** Every one
+  of the 86 tools, the 7-tool safety layer and the 44 charters reach their HubSpot
+  client, schema cache and `PortalConfig` through it, so a hosted deployment can
+  resolve the caller's portal from their access token without a single tool body
+  changing — the same shape as `state.get_store()`.
+- `set_session_resolver()` installs that resolver. With none installed the server
+  keeps exactly its single-portal behaviour, and `_lifespan` remains the
+  single-portal implementation rather than something tools call directly. A test
+  fails the build if anything reaches past the seam to it.
+
+## Unreleased
+
 ### Phase 2 — Task 1: the `StateStore` seam
 
 Groundwork for serving over HTTPS. No user-facing behaviour change on stdio.

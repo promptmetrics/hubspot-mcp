@@ -34,6 +34,7 @@ injected. ``tests/test_smoke.py`` pins this.
 import inspect
 import os
 import typing
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -191,8 +192,47 @@ def _unadvertise_unavailable_tools(matrix) -> None:
                 pass
 
 
+# The per-request session seam (Phase 3).
+#
+# Every one of the 86 tools reaches its HubSpot client, schema cache and
+# PortalConfig through `_session`, so this one function decides whose portal a
+# request acts on. Local/stdio resolves one portal per process at startup and
+# `_session` just hands back the lifespan context. The hosted path installs a
+# resolver that derives the portal from the caller's access token instead, and
+# no tool body changes — the same shape as `state.get_store()`.
+# `Callable`/`Awaitable` are imported for real rather than quoted: this module
+# has no `from __future__ import annotations` (see the module docstring), so the
+# alias is evaluated at import time.
+SessionResolver = Callable[[Context], Awaitable[dict[str, Any]]]
+
+_session_resolver: SessionResolver | None = None
+
+
+def set_session_resolver(resolver: SessionResolver | None) -> None:
+    """Install a per-request session resolver, or reset to single-portal mode."""
+    global _session_resolver
+    _session_resolver = resolver
+
+
+async def _session(ctx: Context) -> dict[str, Any]:
+    """Resolve the HubSpot session this request acts on.
+
+    Returns the established shape — ``client``, ``cache``, ``portal_config``,
+    ``portal_id``, ``auth_error``, ``capabilities``. ``auth_error`` set means
+    the tools still answer but cannot act, which is what lets `tools/list` work
+    cold; under 2026-07-28 there is no handshake in which to fail instead.
+    """
+    if _session_resolver is not None:
+        return await _session_resolver(ctx)
+    return _lifespan(ctx)
+
+
 def _lifespan(ctx: Context) -> dict[str, Any]:
-    """Return the lifespan-context dict."""
+    """Return the lifespan-context dict (single-portal mode only).
+
+    Prefer :func:`_session`: this bypasses the resolver and so always answers
+    for the process-wide portal, which is wrong on a multi-tenant deployment.
+    """
     return ctx.request_context.lifespan_context
 
 
@@ -372,7 +412,7 @@ def _make_domain_wrapper(tool_def: ToolDef):
     name = tool_def.name
 
     async def wrapper(ctx: Context, **kwargs: Any) -> Any:
-        lf = _lifespan(ctx)
+        lf = await _session(ctx)
         if lf.get("auth_error"):
             raise ToolError(lf["auth_error"])
 
@@ -454,7 +494,7 @@ def _domain_tool_registrations() -> list[tuple[str, Any, str]]:
 # --- Safety stateful tools (approve / reject / pending / audit / undo) --------
 
 async def _safety_ctx(ctx: Context) -> dict[str, Any]:
-    lf = _lifespan(ctx)
+    lf = await _session(ctx)
     if lf.get("auth_error"):
         raise ToolError(lf["auth_error"])
     return lf
@@ -658,7 +698,7 @@ def _make_agent_prompt(agent_key: str):
     async def charter(ctx: Context) -> str:
         from hubspot_mcp.agents import _AGENT_REGISTRY
 
-        lf = _lifespan(ctx)
+        lf = await _session(ctx)
         if lf.get("auth_error"):
             raise ToolError(lf["auth_error"])
         builder = _AGENT_REGISTRY[agent_key]
