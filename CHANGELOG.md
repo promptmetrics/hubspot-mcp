@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Phase 3 — stage 1: per-user HubSpot connections
+
+- **`ConnectionStore`** joins an identity subject to the HubSpot portal that
+  person authorised — the bridge between Phase 3's two OAuth relationships.
+  `FileConnectionStore` (0600, for local and self-hosting) and
+  `RedisConnectionStore` (encrypted, for the hosted path), selected by the same
+  `REDIS_URL` / `HUBSPOT_MCP_STATE_BACKEND` rule as the other stores.
+- **Unreadable is not the same as unconnected.** A corrupt record or a rotated
+  encryption key raises `ConnectionUnreadable` rather than returning `None` —
+  reporting "not connected" would send a user round the OAuth flow to fix a
+  key-management problem. This is `StateStore` semantics, not `CacheStore`.
+- **Subjects are hashed into storage keys, not validated.** Identity providers
+  mint subjects in formats we do not control (`auth0|abc`, an email, an opaque
+  id), so a validating regex risks locking out a real user, while the raw value
+  in a Redis key or file path invites injection and traversal. A digest is
+  injection-proof for any input and keeps the subject out of the keyspace.
+- **`HubSpotConnection.__repr__` redacts both tokens.** An unredacted dataclass
+  repr puts a live CRM credential in every traceback that touches the object.
+- The three Redis stores now share an `_EncryptedRedis` base for the connection
+  and cipher. Encryption is common to all of them; *decryption* is not, because
+  the right answer to an unreadable value differs per store — each keeps its own.
+
 ### Phase 3 — stage 1: the per-request session seam
 
 Groundwork for per-user OAuth. No behaviour change on any existing path.
