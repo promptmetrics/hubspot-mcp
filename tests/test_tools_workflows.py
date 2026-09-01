@@ -6,12 +6,12 @@ import pytest
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.tools.workflows import (
+    hubspot_create_workflow,
+    hubspot_enroll_workflow,
     hubspot_get_workflow,
     hubspot_list_workflows,
-    hubspot_create_workflow,
-    hubspot_update_workflow,
-    hubspot_enroll_workflow,
     hubspot_toggle_workflow,
+    hubspot_update_workflow,
 )
 
 

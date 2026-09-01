@@ -1,10 +1,9 @@
 import time
-from pathlib import Path
 
 import httpx
 import pytest
 
-from hubspot_mcp.cache import SchemaCache, WARM_DOMAINS, warm_standard_schemas
+from hubspot_mcp.cache import WARM_DOMAINS, SchemaCache, warm_standard_schemas
 from hubspot_mcp.config import PortalConfig
 
 

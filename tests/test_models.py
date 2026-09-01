@@ -1,4 +1,4 @@
-from hubspot_mcp.models import TaskIntent, RiskLevel, PlanStep, ExecutionPlan, PreviewResult, AgentResult
+from hubspot_mcp.models import AgentResult, ExecutionPlan, PlanStep, PreviewResult, RiskLevel, TaskIntent
 
 
 def test_task_intent_creation():

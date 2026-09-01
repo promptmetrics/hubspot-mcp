@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from hubspot_mcp.agents._base import AgentPrompt, build_agent_prompt
 from hubspot_mcp.agents.account_info import get_account_info_agent_prompt
@@ -25,8 +25,8 @@ from hubspot_mcp.agents.goals import get_goals_agent_prompt
 from hubspot_mcp.agents.hygiene import get_hygiene_agent_prompt
 from hubspot_mcp.agents.invoices import get_invoices_agent_prompt
 from hubspot_mcp.agents.leads import get_leads_agent_prompt
-from hubspot_mcp.agents.lists import get_lists_agent_prompt
 from hubspot_mcp.agents.listings import get_listings_agent_prompt
+from hubspot_mcp.agents.lists import get_lists_agent_prompt
 from hubspot_mcp.agents.object_library import get_object_library_agent_prompt
 from hubspot_mcp.agents.objects import get_objects_agent_prompt
 from hubspot_mcp.agents.orders import get_orders_agent_prompt

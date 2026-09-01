@@ -395,3 +395,36 @@ WRITE_TOOLS: set[str] = {
 # with one of these methods must route through the HITL write gate; a GET is a
 # read. DELETE is additionally treated as destructive (see handlers).
 RAW_API_WRITE_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+# Scopes HubSpot documents in 403 bodies but does not offer in the app's scope
+# picker. Requesting one makes HubSpot reject the WHOLE authorize call, so they
+# are named here as the honest requirement while being excluded from what we
+# ask for. Engagement writes therefore rely on the portal already granting them.
+_HIDDEN_SCOPE_OBJECTS = ("notes", "calls", "tasks", "emails")
+
+
+def authorize_scopes() -> list[str]:
+    """The exact scope set to request at authorize time.
+
+    Derived from the tool registry rather than hardcoded, so a new tool cannot
+    silently under-provision the OAuth grant. Two exclusions, both deliberate:
+
+    * ``.delete`` scopes are never requested (R4, least privilege). Deleting is
+      still possible for a portal that granted them out of band; we just do not
+      ask for destructive access by default.
+    * Hidden engagement scopes are omitted -- see ``_HIDDEN_SCOPE_OBJECTS``.
+    """
+    from hubspot_mcp.tools import list_tools
+
+    found: set[str] = set()
+    for tool_def in list_tools():
+        # Object-scoped tools emit different scopes per object type, so union
+        # over the standard set to get everything the tool can need.
+        for object_type in (None, *_STANDARD_OBJECT_TYPES):
+            found |= get_required_scopes([tool_def.name], object_type)
+
+    def _hidden(scope: str) -> bool:
+        return any(scope.startswith(f"crm.objects.{o}.") for o in _HIDDEN_SCOPE_OBJECTS)
+
+    return sorted(s for s in found if not s.endswith(".delete") and not _hidden(s))

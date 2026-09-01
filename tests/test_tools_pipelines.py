@@ -4,11 +4,11 @@ import pytest
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.tools.pipelines import (
+    hubspot_create_pipeline,
     hubspot_get_pipeline,
     hubspot_list_pipelines,
-    hubspot_create_pipeline,
-    hubspot_update_pipeline,
     hubspot_reorder_stages,
+    hubspot_update_pipeline,
 )
 
 

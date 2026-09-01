@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package + test deps
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check src tests
+
+      - name: Type check (mypy)
+        run: mypy src
+
+      - name: Test suite
+        # Includes the routing corpus accuracy gate (R1) and its coverage check,
+        # which fails if a newly added agent has no corpus entry.
+        run: pytest -x -q
+
+      - name: Blueprint data is packaged in the wheel
+        # Blueprints load via importlib.resources, so a dropped data/ directory
+        # would keep the source tree green while shipping a server with zero
+        # blueprints. bin/run-mcp.sh installs from a wheel on first launch.
+        run: |
+          pip install build
+          python -m build --wheel --outdir dist-check .
+          python - <<'PY'
+          import glob, zipfile, sys
+          whl = glob.glob("dist-check/*.whl")[0]
+          data = [n for n in zipfile.ZipFile(whl).namelist()
+                  if "/blueprints/workflows/data/" in n and n.endswith(".json")]
+          print(f"{len(data)} blueprint JSON files packaged in {whl}")
+          sys.exit(0 if len(data) == 19 else 1)
+          PY
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate plugin manifests + hooks
+        run: claude plugin validate ./
+
+      - name: Shipping-artifact allowlist gate
+        run: bash scripts/check-artifact-allowlist.sh

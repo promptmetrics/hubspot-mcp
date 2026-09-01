@@ -6,7 +6,7 @@ import os
 import re
 import tempfile
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -67,7 +67,7 @@ def store(portal_id: str, action_id: str, data: dict[str, Any]) -> None:
         raise ValueError(f"Invalid action_id: {action_id!r}")
     pending_dir = _pending_previews_dir(portal_id)
     file_path = pending_dir / f"{action_id}.json"
-    data["_stored_at"] = datetime.now(timezone.utc).isoformat()
+    data["_stored_at"] = datetime.now(UTC).isoformat()
     with _dir_lock(pending_dir):
         _atomic_write_json(file_path, data)
 
@@ -108,7 +108,7 @@ def reap_expired(portal_id: str, max_age_hours: int = 24) -> int:
     pending_dir = _pending_previews_dir(portal_id)
     if not pending_dir.exists():
         return 0
-    cutoff = datetime.now(timezone.utc).timestamp() - (max_age_hours * 3600)
+    cutoff = datetime.now(UTC).timestamp() - (max_age_hours * 3600)
     removed = 0
     with _dir_lock(pending_dir):
         for file_path in pending_dir.iterdir():

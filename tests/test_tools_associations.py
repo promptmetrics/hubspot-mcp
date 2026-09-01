@@ -4,10 +4,10 @@ import pytest
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.tools.associations import (
-    hubspot_get_association_schema,
-    hubspot_create_association_schema,
     hubspot_associate_records,
+    hubspot_create_association_schema,
     hubspot_disassociate_records,
+    hubspot_get_association_schema,
 )
 
 

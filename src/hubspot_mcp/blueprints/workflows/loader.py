@@ -34,7 +34,7 @@ def _to_workflow_blueprint(bf: BlueprintFile) -> WorkflowBlueprint:
         description=bf.description,
         tags=list(bf.tags),
         parameter_schema={name: p.model_dump() for name, p in bf.parameters.items()},
-        build=lambda params, _bf=bf: render_spec(_bf, params),
+        build=lambda params, _bf=bf: render_spec(_bf, params),  # type: ignore[misc]
         origin=bf.source.origin,
     )
 

@@ -11,7 +11,6 @@ from typing import Any
 
 from hubspot_mcp.blueprints.workflows.action_type_map import (
     ACTION_TYPE_REGISTRY,
-    BRANCH_TYPES,
     EVENT_TYPE_MAP,
     OPERATOR_MAP,
     resolve_flow_type,
@@ -135,7 +134,7 @@ def _build_action_node(
 
     if ui_action in ACTION_TYPE_REGISTRY:
         reg = ACTION_TYPE_REGISTRY[ui_action]
-        node: dict[str, Any] = {
+        node = {
             "actionId": str(action_id),
             "actionTypeVersion": reg["actionTypeVersion"],
             "actionTypeId": reg["actionTypeId"],

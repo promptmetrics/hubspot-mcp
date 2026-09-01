@@ -4,9 +4,9 @@ import pytest
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.tools.hygiene import (
+    hubspot_bulk_update_objects,
     hubspot_find_duplicates,
     hubspot_merge_objects,
-    hubspot_bulk_update_objects,
     hubspot_preview_segment,
 )
 

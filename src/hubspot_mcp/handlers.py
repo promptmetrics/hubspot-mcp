@@ -415,7 +415,7 @@ async def handle_tool(client, cache, portal_config: PortalConfig, params: dict[s
                 f"it or `hubspot reject {aw.action_id}` to discard.",
                 retryable=exc.retryable,
                 guidance=exc.guidance,
-            )
+            ) from exc
         applied = _applied_envelope(tool_name, aw, result)
         # A --pattern request that was rejected to the normal gate still surfaces
         # WHY, even when the fallback write auto-applied (act-and-notify).
@@ -451,7 +451,7 @@ async def handle_tool(client, cache, portal_config: PortalConfig, params: dict[s
     return _ok(response)
 
 
-def _applied_envelope(tool_name: str, aw, result: "ExecuteResult") -> dict[str, Any]:
+def _applied_envelope(tool_name: str, aw, result: ExecuteResult) -> dict[str, Any]:
     """Envelope for an auto-applied (AUTO-tier) write: the executed result plus
     an undo affordance.  This is a *final result*, not step narration, so it is
     surfaced even under quiet/terse output."""
@@ -623,7 +623,7 @@ async def execute_pending_write(
         try:
             executed = await invoke_tool(tool_name, portal_id, client=client, **_tool_kwargs(payload))
         finally:
-            if owns_client:
+            if owns_client and client is not None:
                 # A close() failure must never turn a successful write into
                 # a failure (that would invite a duplicate re-approve) nor
                 # mask a primary error from invoke_tool.  Log and swallow.
@@ -748,8 +748,8 @@ async def handle_approve(client, cache, portal_config: PortalConfig, params: dic
     if confirm_count is not None:
         try:
             confirm_count = int(confirm_count)
-        except (TypeError, ValueError):
-            raise HandlerError("validation", "'confirm_count' must be an integer.")
+        except (TypeError, ValueError) as exc:
+            raise HandlerError("validation", "'confirm_count' must be an integer.") from exc
     try:
         result = await execute_pending_write(
             portal_config, action_id, confirm_count=confirm_count, client=client
@@ -757,7 +757,7 @@ async def handle_approve(client, cache, portal_config: PortalConfig, params: dic
     except ExecuteError as exc:
         raise HandlerError(
             exc.kind, exc.message, retryable=exc.retryable, guidance=exc.guidance
-        )
+        ) from exc
     return _ok({**result.data, "audit_failed": result.audit_failed})
 
 
@@ -847,7 +847,8 @@ async def _execute_pattern_write(
                 err = current.get("error") if isinstance(current, dict) else current
                 failed.append({"id": rid, "error": f"re-read failed: {err}"})
                 continue
-            cur_props = current.get("properties") if isinstance(current.get("properties"), dict) else {}
+            _props = current.get("properties")
+            cur_props = _props if isinstance(_props, dict) else {}
             # (2) Compare-and-set: apply ONLY if every target field still equals
             # the approved pre-image.  Any drift → skip, never overwrite.
             if any(not _pattern_value_eq(cur_props.get(k), pre_image.get(k)) for k in changes):
@@ -872,7 +873,7 @@ async def _execute_pattern_write(
             applied.append(rid)
             applied_originals[rid] = pre_image
     finally:
-        if owns_client:
+        if owns_client and client is not None:
             try:
                 await client.close()
             except Exception as close_exc:  # noqa: BLE001 — never mask a write result
@@ -1051,7 +1052,7 @@ async def undo_action(
 
         return False, "❌ Unknown action type; cannot undo."
     finally:
-        if owns_client:
+        if owns_client and client is not None:
             await client.close()
 
 

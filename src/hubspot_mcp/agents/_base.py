@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.research import RESEARCH_PROMPT_BLOCK
-from hubspot_mcp.tools import ToolDef, list_tools
+from hubspot_mcp.tools import ToolDef
 
 SELF_CORRECTION_PROMPT_BLOCK = """\
 ## Self-correction rules

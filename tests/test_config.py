@@ -1,6 +1,5 @@
 import os
 import stat
-from pathlib import Path
 
 
 def test_save_portal_config_sets_0o600(tmp_path, monkeypatch):
@@ -39,7 +38,7 @@ def test_load_portal_config_from_env(monkeypatch, tmp_path):
 
 
 def test_save_and_load_portal_config(tmp_path, monkeypatch):
-    from hubspot_mcp.config import save_portal_config, load_portal_config, PortalConfig
+    from hubspot_mcp.config import PortalConfig, load_portal_config, save_portal_config
     monkeypatch.setattr("hubspot_mcp.config.CONFIG_DIR", tmp_path / "hubspot")
     portal = PortalConfig(portal_id="456", token="secret-token")
     save_portal_config(portal)
@@ -49,7 +48,7 @@ def test_save_and_load_portal_config(tmp_path, monkeypatch):
 
 
 def test_json_config_with_oauth_fields(tmp_path, monkeypatch):
-    from hubspot_mcp.config import save_portal_config, load_portal_config, PortalConfig
+    from hubspot_mcp.config import PortalConfig, load_portal_config, save_portal_config
     monkeypatch.setattr("hubspot_mcp.config.CONFIG_DIR", tmp_path / "hubspot")
     portal = PortalConfig(
         portal_id="789",
@@ -70,7 +69,7 @@ def test_json_config_with_oauth_fields(tmp_path, monkeypatch):
 
 
 def test_backward_compat_token_file(tmp_path, monkeypatch):
-    from hubspot_mcp.config import CONFIG_DIR, load_portal_config
+    from hubspot_mcp.config import load_portal_config
     monkeypatch.setattr("hubspot_mcp.config.CONFIG_DIR", tmp_path / "hubspot")
     token_file = (tmp_path / "hubspot") / "12345.token"
     token_file.parent.mkdir(parents=True, exist_ok=True)

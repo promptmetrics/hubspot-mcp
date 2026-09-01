@@ -20,13 +20,12 @@ from unittest.mock import patch
 import pytest
 
 from hubspot_mcp import audit
+from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.handlers import (
     HandlerError,
-    execute_pending_write,
     handle_approve,
     handle_tool,
 )
-from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.persistence import load as _load_pending
 from hubspot_mcp.snapshot import load_undo_snapshot, snapshot_dir_for_portal
 

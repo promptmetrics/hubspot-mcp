@@ -8,7 +8,6 @@ from hubspot_mcp.tools import tool
 from hubspot_mcp.tools.objects import _validate_object_type
 from hubspot_mcp.validation import validate_properties
 
-
 _BATCH_SIZE = 100
 # HubSpot /search caps a single page at 100 results; duplicate detection must
 # page through all matches (bug 3) instead of inspecting only the first page.

@@ -4,13 +4,13 @@ import pytest
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.tools.engagements import (
-    hubspot_get_engagement,
-    hubspot_search_engagements,
-    hubspot_create_note,
-    hubspot_create_task,
+    hubspot_create_call,
     hubspot_create_email,
     hubspot_create_meeting,
-    hubspot_create_call,
+    hubspot_create_note,
+    hubspot_create_task,
+    hubspot_get_engagement,
+    hubspot_search_engagements,
 )
 
 

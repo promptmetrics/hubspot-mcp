@@ -1,5 +1,5 @@
 def test_tool_decorator_registers():
-    from hubspot_mcp.tools import tool, registry
+    from hubspot_mcp.tools import registry, tool
 
     @tool(name="test_tool", description="A test tool")
     async def test_tool(x: int) -> dict:

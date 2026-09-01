@@ -1,28 +1,40 @@
 {
   "name": "hubspot-mcp",
   "version": "0.1.1",
-  "description": "HubSpot CRM MCP server — 76 domain tools + write-safety preview/approve gate, undo snapshots, audit log. Bring-your-own-app OAuth.",
-  "author": { "name": "Izzy Aly" },
+  "description": "HubSpot CRM MCP server (protocol 2026-07-28) \u2014 79 domain tools + write-safety preview/approve gate with risk-tiered approval, pattern approval, undo snapshots and audit log, plus 44 specialist charters as MCP prompts. Bring-your-own-app OAuth.",
+  "author": {
+    "name": "Izzy Aly"
+  },
   "license": "MIT",
-  "keywords": ["hubspot", "crm", "mcp", "model-context-protocol", "claude"],
+  "keywords": [
+    "hubspot",
+    "crm",
+    "mcp",
+    "model-context-protocol",
+    "claude"
+  ],
   "userConfig": {
     "hubspot_client_id": {
+      "title": "HubSpot Client ID",
       "type": "string",
       "description": "HubSpot app Client ID (find it in your app's Auth tab in the HubSpot developer portal).",
       "required": true
     },
     "hubspot_client_secret": {
+      "title": "HubSpot Client Secret",
       "type": "string",
       "description": "HubSpot app Client Secret (same Auth tab). Stored in your OS keychain and written to ~/.claude/hubspot/app_credentials.json (chmod 600); only ever sent to HubSpot's token endpoint.",
       "required": true,
       "sensitive": true
     },
     "hubspot_portal_id": {
+      "title": "HubSpot Portal ID",
       "type": "string",
       "description": "The HubSpot portal (hub) ID the server should operate on.",
       "required": true
     },
     "hubspot_region": {
+      "title": "HubSpot Region",
       "type": "string",
       "description": "App region: 'us' (default) or 'eu'. Use 'eu' only if your app was created in the EU developer portal.",
       "required": false
@@ -31,7 +43,9 @@
   "mcpServers": {
     "hubspot": {
       "command": "sh",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/run-mcp.sh"],
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/bin/run-mcp.sh"
+      ],
       "env": {
         "HUBSPOT_PORTAL": "${user_config.hubspot_portal_id}"
       }

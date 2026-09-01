@@ -89,6 +89,7 @@ async def test_client_429_post_still_raises(respx_mock):
 @pytest.mark.asyncio
 async def test_client_429_retry_sleep_is_capped(respx_mock, monkeypatch):
     import asyncio
+
     from hubspot_mcp.errors import RateLimitError
     client = HubSpotClient(PortalConfig(portal_id="123", token="test-token"))
     route = respx_mock.get("https://api.hubapi.com/crm/v3/objects/contacts/1").mock(
@@ -130,7 +131,7 @@ async def test_client_hubspot_error(respx_mock):
 @pytest.mark.asyncio
 async def test_client_401_triggers_refresh(respx_mock, monkeypatch, tmp_path):
     import time
-    from pathlib import Path
+
     from hubspot_mcp.app_credentials import save_app_credentials
     monkeypatch.setattr("hubspot_mcp.config.CONFIG_DIR", tmp_path)
     save_app_credentials(client_id="client-123", client_secret="secret-456")
@@ -171,8 +172,9 @@ async def test_client_401_triggers_refresh(respx_mock, monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_client_401_after_refresh_raises(respx_mock, monkeypatch, tmp_path):
     import time
-    from hubspot_mcp.errors import HubSpotError
+
     from hubspot_mcp.app_credentials import save_app_credentials
+    from hubspot_mcp.errors import HubSpotError
 
     monkeypatch.setattr("hubspot_mcp.config.CONFIG_DIR", tmp_path)
     save_app_credentials(client_id="client-123", client_secret="secret-456")
@@ -203,7 +205,7 @@ async def test_client_401_after_refresh_raises(respx_mock, monkeypatch, tmp_path
 
 @pytest.mark.asyncio
 async def test_client_400_validation_with_field_errors(respx_mock):
-    from hubspot_mcp.errors import HubSpotError, ErrorCategory
+    from hubspot_mcp.errors import ErrorCategory, HubSpotError
     client = HubSpotClient(PortalConfig(portal_id="123", token="test-token"))
     respx_mock.get("https://api.hubapi.com/crm/v3/objects/contacts/1").mock(
         return_value=httpx.Response(
@@ -220,7 +222,7 @@ async def test_client_400_validation_with_field_errors(respx_mock):
 
 @pytest.mark.asyncio
 async def test_client_400_validation_without_errors_key(respx_mock):
-    from hubspot_mcp.errors import HubSpotError, ErrorCategory
+    from hubspot_mcp.errors import ErrorCategory, HubSpotError
     client = HubSpotClient(PortalConfig(portal_id="123", token="test-token"))
     respx_mock.get("https://api.hubapi.com/crm/v3/objects/contacts/1").mock(
         return_value=httpx.Response(400, json={"message": "Bad request"})
@@ -235,8 +237,9 @@ async def test_client_400_validation_without_errors_key(respx_mock):
 @pytest.mark.asyncio
 async def test_client_401_auth_category(respx_mock, monkeypatch, tmp_path):
     import time
-    from hubspot_mcp.errors import HubSpotError, ErrorCategory
+
     from hubspot_mcp.app_credentials import save_app_credentials
+    from hubspot_mcp.errors import ErrorCategory, HubSpotError
 
     monkeypatch.setattr("hubspot_mcp.config.CONFIG_DIR", tmp_path)
     save_app_credentials(client_id="client-123", client_secret="secret-456")
@@ -268,7 +271,7 @@ async def test_client_401_auth_category(respx_mock, monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_client_403_scope_category(respx_mock):
-    from hubspot_mcp.errors import ScopeError, ErrorCategory
+    from hubspot_mcp.errors import ErrorCategory, ScopeError
     client = HubSpotClient(PortalConfig(portal_id="123", token="test-token"))
     respx_mock.get("https://api.hubapi.com/crm/v3/objects/contacts/1").mock(
         return_value=httpx.Response(403, json={"message": "Forbidden"})
@@ -285,7 +288,7 @@ async def test_client_403_scope_category(respx_mock):
 
 @pytest.mark.asyncio
 async def test_client_403_scope_without_expected_scopes(respx_mock):
-    from hubspot_mcp.errors import HubSpotError, ErrorCategory
+    from hubspot_mcp.errors import ErrorCategory, HubSpotError
     client = HubSpotClient(PortalConfig(portal_id="123", token="test-token"))
     respx_mock.get("https://api.hubapi.com/crm/v3/objects/contacts/1").mock(
         return_value=httpx.Response(403, json={"message": "Forbidden"})
@@ -298,7 +301,7 @@ async def test_client_403_scope_without_expected_scopes(respx_mock):
 
 @pytest.mark.asyncio
 async def test_client_404_not_found_category(respx_mock):
-    from hubspot_mcp.errors import HubSpotError, ErrorCategory
+    from hubspot_mcp.errors import ErrorCategory, HubSpotError
     client = HubSpotClient(PortalConfig(portal_id="123", token="test-token"))
     respx_mock.get("https://api.hubapi.com/crm/v3/objects/contacts/1").mock(
         return_value=httpx.Response(404, json={"message": "Not found"})
@@ -311,7 +314,7 @@ async def test_client_404_not_found_category(respx_mock):
 
 @pytest.mark.asyncio
 async def test_client_409_conflict_category(respx_mock):
-    from hubspot_mcp.errors import HubSpotError, ErrorCategory
+    from hubspot_mcp.errors import ErrorCategory, HubSpotError
     client = HubSpotClient(PortalConfig(portal_id="123", token="test-token"))
     respx_mock.get("https://api.hubapi.com/crm/v3/objects/contacts/1").mock(
         return_value=httpx.Response(409, json={"message": "Conflict"})
@@ -324,7 +327,7 @@ async def test_client_409_conflict_category(respx_mock):
 
 @pytest.mark.asyncio
 async def test_client_500_server_category(respx_mock):
-    from hubspot_mcp.errors import HubSpotError, ErrorCategory
+    from hubspot_mcp.errors import ErrorCategory, HubSpotError
     client = HubSpotClient(PortalConfig(portal_id="123", token="test-token"))
     respx_mock.get("https://api.hubapi.com/crm/v3/objects/contacts/1").mock(
         return_value=httpx.Response(500, text="Internal Server Error")

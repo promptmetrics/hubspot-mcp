@@ -4,12 +4,11 @@ import json
 import os
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from hubspot_mcp.redaction import redact_dict_for_disk
-
 
 EVENT_TYPES = frozenset({
     "request_received",
@@ -53,7 +52,7 @@ class TraceEvent:
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> TraceEvent:
         ts = raw.get("timestamp", "")
-        timestamp = datetime.fromisoformat(ts) if ts else datetime.now(timezone.utc)
+        timestamp = datetime.fromisoformat(ts) if ts else datetime.now(UTC)
         return cls(
             event_type=raw["event_type"],
             timestamp=timestamp,
@@ -111,7 +110,7 @@ def emit_trace(
 
     event = TraceEvent(
         event_type=event_type,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         trace_id=trace_id,
         portal_id=portal_id,
         data=data,
@@ -203,7 +202,7 @@ def compute_status_aggregates(
             "error_rate": 0.0,
         }
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cutoff = now.timestamp() - (window_hours * 3600)
 
     trace_groups: dict[str, list[TraceEvent]] = {}
@@ -218,7 +217,7 @@ def compute_status_aggregates(
     tool_call_counts: dict[str, int] = {}
     error_count = 0
 
-    for trace_id, trace_events in trace_groups.items():
+    for trace_events in trace_groups.values():
         trace_events.sort(key=lambda e: e.timestamp)
         start = trace_events[0].timestamp
         end = trace_events[-1].timestamp

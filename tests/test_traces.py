@@ -50,7 +50,7 @@ def test_invalid_event_type(tmp_path, monkeypatch):
 
     try:
         emit_trace("123", "bogus", new_trace_id(), {})
-        assert False, "should have raised"
+        raise AssertionError("should have raised")
     except ValueError as exc:
         assert "Invalid event_type" in str(exc)
 

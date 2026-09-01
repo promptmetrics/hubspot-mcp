@@ -26,7 +26,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
-
 _PARAM_TOKEN_RE = re.compile(r"\{\{param:([a-zA-Z_][a-zA-Z0-9_]*)\}\}")
 _EXACT_TOKEN_RE = re.compile(r"^\{\{param:([a-zA-Z_][a-zA-Z0-9_]*)\}\}$")
 

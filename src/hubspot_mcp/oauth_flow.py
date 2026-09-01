@@ -19,7 +19,6 @@ from hubspot_mcp.app_credentials import (
     get_token_fallback_url,
 )
 from hubspot_mcp.config import CONFIG_DIR, PortalConfig, load_portal_config, save_portal_config
-
 from hubspot_mcp.fileio import write_private_json
 
 _REFRESH_BUFFER_SECONDS = 300  # refresh if within 5 minutes of expiry
@@ -235,7 +234,6 @@ def _save_oauth_tokens(
     expires_in: int,
     scopes_granted: list[str] | None = None,
 ) -> None:
-    from hubspot_mcp.config import PortalConfig
 
     # A refresh response may omit the ``scope`` field; preserve the previously
     # granted scopes so the setup scope-gap report stays accurate across refresh.

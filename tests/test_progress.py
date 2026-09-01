@@ -1,12 +1,10 @@
 from pathlib import Path
 
-import pytest
-
 from hubspot_mcp.progress import ProgressTracker, read_progress
 
 
 def test_progress_tracker_creates_file(tmp_path):
-    pt = ProgressTracker("123", "a1", 100, 10, base_dir=tmp_path)
+    ProgressTracker("123", "a1", 100, 10, base_dir=tmp_path)
     assert (tmp_path / "progress" / "a1.json").exists()
 
 
