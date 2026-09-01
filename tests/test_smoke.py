@@ -22,7 +22,10 @@ from hubspot_mcp.tools import list_tools
 def test_package_imports():
     import hubspot_mcp  # noqa: F401
 
-    assert hubspot_mcp.__version__ == "0.1.1"
+    # Pinned deliberately: test_packaging asserts pyproject, plugin.json and
+    # marketplace.json all agree, and this ties the package constant to them, so
+    # a release that updates three of the four fails here.
+    assert hubspot_mcp.__version__ == "0.2.0"
 
 
 def test_registry_has_76_tools():

@@ -10,7 +10,7 @@
       "name": "hubspot-mcp",
       "source": "./",
       "description": "HubSpot CRM MCP server (protocol 2026-07-28) \u2014 79 domain tools + write-safety preview/approve gate with risk-tiered approval, pattern approval, undo snapshots and audit log, plus 44 specialist charters as MCP prompts. Bring-your-own-app OAuth.",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "author": {
         "name": "Izzy Aly"
       },

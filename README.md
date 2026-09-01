@@ -3,10 +3,15 @@
 A standalone [Model Context Protocol](https://modelcontextprotocol.io) server
 for HubSpot CRM, distributable as a **Claude Code plugin**.
 
-Exposes **76 domain tools** (contacts, companies, deals, tickets, pipelines,
-owners, search, docs, etc.) plus a **5-tool write-safety layer**: every write
-produces a preview you approve or reject, with undo snapshots and an audit log.
-No write touches HubSpot until it is approved.
+Speaks MCP protocol **`2026-07-28`** (and still serves handshake-era clients
+back to `2024-11-05`, so nothing already installed breaks).
+
+Exposes **79 domain tools** (contacts, companies, deals, tickets, pipelines,
+owners, search, workflows, blueprints, docs, etc.), a **7-tool safety and
+introspection layer**, and **44 specialist charters as MCP prompts**.
+
+Every write is gated. Nothing reaches HubSpot until a human approves it, and
+each approved write records an undo snapshot and an audit entry.
 
 Auth is **bring-your-own-app OAuth** (default) — you supply your own HubSpot
 private app's client credentials; tokens refresh automatically. A private-app
@@ -55,7 +60,7 @@ To sign in to your portal, run:
 ```
 
 This opens a browser to HubSpot; approve the scopes. After it prints
-`OAuth login succeeded`, the 81 HubSpot tools are live.
+`OAuth login succeeded`, the 86 HubSpot tools are live.
 
 > **First run:** the MCP server provisions an isolated Python venv on first
 > launch (this takes ~20–30s while it installs `mcp`, `httpx`, `pydantic`).
@@ -64,12 +69,41 @@ This opens a browser to HubSpot; approve the scopes. After it prints
 
 ## Tools
 
-- **76 domain tools**: CRUD + search across contacts, companies, deals,
+- **79 domain tools**: CRUD + search across contacts, companies, deals,
   tickets, tasks, owners, pipelines, stages, properties, lists, engagements,
-  docs search, and more.
-- **5 safety tools**: `hubspot_approve_write`, `hubspot_reject_write`,
-  `hubspot_list_pending_writes`, `hubspot_list_recent_audit`,
-  `hubspot_undo_write`.
+  workflows, workflow blueprints, official-docs search, and more.
+- **7 safety and introspection tools**: `hubspot_approve_write`,
+  `hubspot_reject_write`, `hubspot_list_pending_writes`,
+  `hubspot_list_recent_audit`, `hubspot_undo_write`, `hubspot_status`
+  (portal entitlements + request/error/cost aggregates), and `hubspot_route`
+  (which specialist charter handles a request).
+- **44 charters as MCP prompts** (`hubspot_objects`, `hubspot_workflows`, …):
+  per-domain operating instructions naming the tools that domain may use, its
+  self-correction rules, and a mandatory re-fetch-and-compare after every write.
+
+### Approval tiers
+
+Not every write deserves the same ceremony, so each is classified:
+
+| Tier | When | What you do |
+|---|---|---|
+| `AUTO` | reversible, single-record, no sensitive field | applies immediately, reports an undo command |
+| `CONFIRM` | sensitive property, large batch, or a side-effectful tool | one approval, no count |
+| `FULL_GATE` | destructive, or reversibility not confirmed | approve with the **exact** record count |
+
+Safety lists are configurable per portal in `approval_policy.json`, but an
+override can only *add* a protection, never remove a shipped one.
+
+On clients that support elicitation the approval happens **inline in one call**
+(MCP Multi Round-Trip Requests); elsewhere it falls back to the
+`hubspot_approve_write` flow, so cross-session approval keeps working.
+
+### Portal-aware tool surface
+
+Tools your portal is not entitled to (workflows, users, service automation) are
+dropped from `tools/list` — but only when the entitlement probe is *conclusive*.
+A transient failure leaves them advertised and explains any refusal at call
+time, rather than silently hiding a dozen tools after one network blip.
 
 Every mutating call goes through a **preview → approve** gate. Approved writes
 record an undo snapshot and an audit-log entry under
@@ -95,7 +129,7 @@ bin/run-mcp.sh                    venv-provisioning MCP launcher
 bin/session-start.sh              SessionStart hook: writes app_credentials.json
 hooks/hooks.json                  SessionStart hook wiring
 skills/auth/SKILL.md              /hubspot-mcp:auth slash command
-src/hubspot_mcp/                  the MCP server (76 domain + 5 safety tools)
+src/hubspot_mcp/                  the MCP server (79 domain + 7 safety/introspection tools, 44 prompts)
 ```
 
 ## Troubleshooting

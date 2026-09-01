@@ -1,6 +1,6 @@
 ---
 title: "HubSpot MCP — Phase 1 Build Plan"
-status: draft-for-review
+status: phase-1-shipped
 audience: dev team
 created: 2026-07-07
 owner: Izzy
@@ -8,6 +8,16 @@ spec: docs/architecture.md
 ---
 
 # HubSpot MCP — Phase 1 Build Plan
+
+> **Status update (2026-09-01): Task 10 is resolved.** The open question below
+> — how to port the 44 agents, given they are Python modules rather than Claude
+> Code sub-agent markdown — was settled by reading them: they are prompt
+> *builders*, each returning an `AgentPrompt(agent_name, system_prompt,
+> tool_names, domain_description)`. They are now registered as 44 MCP **prompts**
+> plus a `hubspot_route` tool, which is option (B) below and works for every MCP
+> client rather than Claude Code only. The rest of this document is the original
+> Phase 1 plan, kept as the record of how the build was scoped.
+
 
 ## Context
 
