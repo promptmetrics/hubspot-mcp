@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Phase 3 — stage 1: connecting a HubSpot account
+
+- **`ConnectFlow`** bridges the awkward gap in hosted OAuth: authorising HubSpot
+  is a *browser* journey, but the person's identity comes from an MCP access
+  token a browser never carries. A tool mints a one-time **ticket** bound to the
+  caller's subject and returns a link; opening it is what proves who is
+  connecting. `GET /connect/hubspot` redeems it, `GET /connect/hubspot/callback`
+  exchanges the code and stores the connection.
+- **The ticket and the OAuth `state` are credentials in a URL**, and are treated
+  as such: single-use, 10-minute TTL, and stored under a digest of themselves so
+  a dump of the backing store yields nothing replayable. A forged, replayed and
+  expired `state` all return the *same* message — telling an attacker which they
+  hit is free help.
+- **The redirect URI is server-configured, never taken from the request** — a
+  caller-supplied one is how an OAuth flow becomes an open redirect.
+- **The portal comes from HubSpot, not the caller.** A public app cannot know
+  the portal in advance because the user picks the account on HubSpot's consent
+  screen; it arrives as `hub_id` on the token response, with the token-info
+  endpoint as the documented fallback.
+- The callback page escapes everything it renders, including HubSpot's own
+  `error_description`, and an unexpected failure shows a generic message while
+  the detail goes to stderr for the operator.
+
 ### Phase 3 — stage 1: resolving a caller's HubSpot session
 
 - **`HostedOAuthProvider`** answers "which portal did *this caller* authorise?",
