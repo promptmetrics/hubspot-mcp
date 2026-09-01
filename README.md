@@ -120,6 +120,24 @@ hubspot-mcp auth login --portal <id> --mode token   # PAT fallback
 hubspot-mcp auth status --portal <id>      # show auth state
 ```
 
+### Serving over HTTP
+
+Every HTTP request must carry `Authorization: Bearer $HUBSPOT_MCP_SERVER_SECRET`
+— protocol `2026-07-28` has no handshake, so there is no connection to
+authenticate once and trust thereafter. `GET /healthz` is the one public path.
+
+```sh
+export HUBSPOT_MCP_SERVER_SECRET="$(openssl rand -base64 32)"
+hubspot-mcp run --transport http --host 0.0.0.0 --port 8000
+```
+
+The server **refuses to start** on any non-loopback bind without that variable
+set, or with a secret shorter than 32 characters. Binding to `127.0.0.1` without
+one is allowed for local development and warns on stderr.
+
+The token is a single shared secret for the whole deployment, so one portal per
+process — per-user OAuth and multi-tenancy are Phase 3.
+
 ## Layout
 
 ```

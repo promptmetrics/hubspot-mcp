@@ -89,10 +89,10 @@ per-request `tools/list` filter.
 |---|---|---|---|
 | 1 | ✅ **Done.** **Route persistence through `StateStore`.** Introduce a module-level `get_store()` returning the configured implementation; convert the ~28 direct call sites in `handlers.py`, `snapshot.py`, `safety.py`, `server.py`. Behaviour-identical — `FileStateStore` stays the default and the 628 tests must pass untouched. | — | 0.75d |
 | 2 | **`RedisStateStore`.** Implement all 11 methods against Upstash (or Vercel's Redis integration). Pending previews and snapshots are Fernet-encrypted blobs keyed by `portal_id:action_id`; audit is an append-only list. Port `FileStateStore`'s tests against it via a shared conformance suite so both implementations are held to one contract. | 1 | 0.75d |
-| 3 | **Per-request bearer auth.** `SERVER_SECRET` from env, constant-time compare, wired through the SDK's `token_verifier` rather than middleware — there is no handshake to authenticate in. `auth/bearer_middleware.py` already documents this; replace the stub. | — | 0.25d |
+| 3 | ✅ **Done** (with a correction, below). **Per-request bearer auth.** `SERVER_SECRET` from env, constant-time compare, wired through the SDK's `token_verifier` rather than middleware — there is no handshake to authenticate in. `auth/bearer_middleware.py` already documents this; replace the stub. | — | 0.25d |
 | 4 | **Move the remaining local-disk state.** Schema cache, capability cache and docs index are per-instance today; on Vercel each cold instance rebuilds them (the docs index costs ~40 fetches). Move to Redis with the same TTLs. | 1, 2 | 0.35d |
 | 5 | **Single-tenant guard.** Refuse to start when the deployment cannot resolve exactly one portal; add a startup assertion and a test. Document the boundary in the README. | — | 0.15d |
-| 6 | **Vercel deployment.** `vercel.json` with the FastAPI entrypoint and `maxDuration`; `streamable_http_app()` mounted; env vars for `SERVER_SECRET`, HubSpot credentials, Redis URL. `/healthz`. Preview deployment per PR. | 2, 3 | 0.4d |
+| 6 | **Vercel deployment.** `vercel.json` with the FastAPI entrypoint and `maxDuration`; `streamable_http_app()` mounted; env vars for `HUBSPOT_MCP_SERVER_SECRET`, HubSpot credentials, Redis URL. (`/healthz` landed with Task 3.) Preview deployment per PR. | 2, 3 | 0.4d |
 | 7 | **Ops documentation.** Update `docs/architecture.md` §4 and D7→D11; document the WAF gotcha — if anything sits in front of the endpoint, allowlist Anthropic's MCP egress `160.79.104.0/21` on `/mcp` and `/healthz`, since WAF bot-blocking is the most common "cannot reach MCP server" cause. | 6 | 0.2d |
 
 **Estimated: ~2.85 dev-days**, against the spec's ~2–3. The estimate holds only
@@ -119,6 +119,44 @@ now fixed:
 `src/`, no `Path` appears in an interface signature, and — the decisive one — a
 full preview → approve cycle against an in-memory store creates no files, with
 the state directory pointed at a path asserted never to come into existence.
+
+---
+
+### Task 3 outcome — and a correction to this plan
+
+The task row above said to wire auth "through the SDK's `token_verifier` rather
+than middleware". That conflates two different things called middleware, and the
+conclusion it draws is wrong:
+
+- **MCP-protocol middleware** (`Middleware.on_initialize`) genuinely cannot be
+  used — the handshake it keys off no longer runs. That is the real §1 finding.
+- **ASGI middleware** runs per request by construction, one call per HTTP
+  request. It was never connection-scoped, so the objection does not apply.
+
+And `token_verifier` turns out to be the wrong seam for a *shared static
+secret*: the SDK requires `AuthSettings` alongside it, which declares the server
+an OAuth 2.1 protected resource — publishing
+`/.well-known/oauth-protected-resource` and pointing 401s at an issuer. Phase 2
+has no authorization server to point at, so a client following that metadata
+would chase a discovery flow that does not exist. `token_verifier` becomes the
+right seam in Phase 3, when per-user OAuth gives it something true to say.
+
+Shipped instead: `auth/bearer_middleware.BearerAuthMiddleware`, a bare ASGI
+wrapper (not Starlette's `BaseHTTPMiddleware`, which buffers responses and would
+break the transport's streaming). Three things worth noting:
+
+- **`server.build_http_app()` is where the wrapper lives**, not the `run()`
+  branch — Vercel imports the ASGI app rather than calling `run()`, so guarding
+  only the uvicorn path would have shipped the hosted deployment unguarded.
+- **It fails closed.** A bind to anything other than loopback with no secret, or
+  a secret under 32 characters, refuses to start. A guessable secret on a public
+  endpoint is worse than none, because it looks protected.
+- **The env var is `HUBSPOT_MCP_SERVER_SECRET`**, not the plan's bare
+  `SERVER_SECRET`.
+
+Comparison is against a SHA-256 digest rather than the raw token, so
+`compare_digest` cannot leak the secret's length; missing, malformed and wrong
+tokens all return one identical 401.
 
 ---
 
@@ -156,9 +194,12 @@ the state directory pointed at a path asserted never to come into existence.
 
 ## 7. Open questions
 
-1. **Redis provider** — Upstash via Vercel's marketplace integration, or Vercel's
-   own Redis? Upstash was chosen in D7 for the free tier; on a paid team the
-   integration story may matter more than the tier.
+1. ~~**Redis provider**~~ — **decided 2026-09-01: Vercel's own Redis.** D7 picked
+   Upstash for its free tier, which is irrelevant on a paid team. The whole
+   argument for Vercel over Cloud Run (D11) was cutting the number of platforms
+   we operate; reaching for a marketplace third party gives half of that back.
+   One vendor, one bill, one dashboard, env vars wired to the project
+   automatically. Accepted cost: some lock-in to unpick if we ever leave Vercel.
 2. **Token storage.** Phase 1 keeps the HubSpot refresh token in a 0600 file. In
    Phase 2 single-tenant it can be an env var, but that puts a long-lived
    refresh token in the deployment config. Encrypted in Redis is better hygiene
