@@ -1,0 +1,109 @@
+{
+  "format_version": 1,
+  "name": "re_closing_day",
+  "description": "Post-close sequence: set customer status, anniversary date, future tasks, and add to past-client list.",
+  "tags": [
+    "real-estate",
+    "closing",
+    "post-close",
+    "retention"
+  ],
+  "source": {
+    "origin": "shipped"
+  },
+  "notes": [],
+  "flags": [],
+  "parameters": {},
+  "spec": {
+    "ui_path": "Settings > Automation > Workflows > Create workflow",
+    "object_type": "Deal-based",
+    "enrollment": {
+      "type": "PROPERTY_BASED",
+      "filter_branch": {
+        "filterBranchType": "OR",
+        "filterBranches": [
+          {
+            "filterBranchType": "AND",
+            "filters": [
+              {
+                "filterType": "PROPERTY",
+                "property": "dealstage",
+                "operation": {
+                  "operationType": "ENUMERATION",
+                  "operator": "IS_ANY_OF",
+                  "values": [
+                    "closedwon"
+                  ],
+                  "includeObjectsWithNoValueSet": false
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "actions": [
+      {
+        "step": 1,
+        "ui_action": "Set property value",
+        "fields": {
+          "Property": "lifecyclestage",
+          "Value": "customer"
+        }
+      },
+      {
+        "step": 2,
+        "ui_action": "Set property value",
+        "fields": {
+          "Property": "anniversary_date",
+          "Value": "{{today}}"
+        }
+      },
+      {
+        "step": 3,
+        "ui_action": "Create task",
+        "fields": {
+          "Title": "30-day check-in call",
+          "Due date": "{{timestamp + 30d}}",
+          "Assigned to": "{{deal.hubspot_owner_id}}",
+          "Priority": "Medium"
+        }
+      },
+      {
+        "step": 4,
+        "ui_action": "Create task",
+        "fields": {
+          "Title": "6-month anniversary touch",
+          "Due date": "{{timestamp + 6 months}}",
+          "Assigned to": "{{deal.hubspot_owner_id}}",
+          "Priority": "Low"
+        }
+      },
+      {
+        "step": 5,
+        "ui_action": "Create task",
+        "fields": {
+          "Title": "1-year anniversary gift",
+          "Due date": "{{timestamp + 1 year}}",
+          "Assigned to": "{{deal.hubspot_owner_id}}",
+          "Priority": "Low"
+        }
+      },
+      {
+        "step": 6,
+        "ui_action": "Add to static list",
+        "fields": {
+          "List": "[RE] Past Clients"
+        }
+      }
+    ],
+    "prerequisites": [
+      "Deal property 'anniversary_date' exists on Contact",
+      "Static list '[RE] Past Clients' exists"
+    ],
+    "validation": [
+      "Move test deal to Closed Won",
+      "Verify lifecyclestage=customer, anniversary_date set, 3 tasks created, contact added to list"
+    ]
+  }
+}

@@ -5,6 +5,7 @@ Source: reverse-engineered from portal 148408595 via GET /automation/v4/flows/{i
 
 from __future__ import annotations
 
+import copy
 import re
 from typing import Any
 
@@ -12,9 +13,11 @@ from hubspot_mcp.blueprints.workflows.action_type_map import (
     ACTION_TYPE_REGISTRY,
     BRANCH_TYPES,
     EVENT_TYPE_MAP,
+    OPERATOR_MAP,
     resolve_flow_type,
     resolve_object_type_id,
 )
+from hubspot_mcp.blueprints.workflows.schema import is_raw_action
 
 
 def _parse_delay(fields: dict[str, Any]) -> tuple[int, str]:
@@ -39,15 +42,19 @@ def _parse_due(raw: str) -> tuple[int, str]:
     m = re.search(r"\+\s*(\d+)\s*(h|hour|hours)", raw)
     if m:
         return int(m.group(1)), "HOURS"
-    m = re.search(r"\+\s*(\d+)\s*(m|min|minute|minutes)", raw)
-    if m:
-        return int(m.group(1)), "MINUTES"
     m = re.search(r"\+\s*(\d+)\s*(d|day|days)", raw)
     if m:
         return int(m.group(1)), "DAYS"
+    # month must be checked before minutes: the minutes alternation ``m``
+    # would otherwise match the leading ``m`` of ``month`` (e.g. ``+1month``
+    # parsed as 1 MINUTE). The extractor's due-date inverter relies on this
+    # so MONTHS tasks (re_closing_day) round-trip.
     m = re.search(r"\+\s*(\d+)\s*(month|months)", raw)
     if m:
         return int(m.group(1)), "MONTHS"
+    m = re.search(r"\+\s*(\d+)\s*(m|min|minute|minutes)", raw)
+    if m:
+        return int(m.group(1)), "MINUTES"
     m = re.search(r"\+\s*(\d+)\s*(year|years)", raw)
     if m:
         return int(m.group(1)) * 12, "MONTHS"
@@ -98,6 +105,31 @@ def _build_action_node(
     action: dict[str, Any],
     next_id: int | None,
 ) -> dict[str, Any]:
+    # Raw action: a verbatim V4 node captured by the extractor, carried as data
+    # so unknown/portal-specific actions can still be re-created. Deep-copy the
+    # stored node, stamp a fresh actionId, and rewire its connection to the
+    # neighbor. A raw LIST_BRANCH cannot be rewired generically (its branch
+    # edges and defaultBranch point at stale actionIds) — refuse it here as the
+    # second guard behind the extractor's topology check (R1).
+    if is_raw_action(action):
+        stored = action.get("node")
+        if not isinstance(stored, dict):
+            raise ValueError("Raw action is missing its stored 'node' payload.")
+        if stored.get("type") == "LIST_BRANCH":
+            raise ValueError(
+                "Raw LIST_BRANCH nodes cannot be re-wired generically; "
+                "extract this workflow as a native If/then branch instead."
+            )
+        node = copy.deepcopy(stored)
+        node["actionId"] = str(action_id)
+        if next_id is not None:
+            node["connection"] = {"edgeType": "STANDARD", "nextActionId": str(next_id)}
+        else:
+            # Last node in the sequence: the stored node's old connection points
+            # at a stale neighbor, so strip it.
+            node.pop("connection", None)
+        return node
+
     ui_action = action["ui_action"]
     fields = action.get("fields", {})
 
@@ -187,13 +219,7 @@ def _build_branch_node(
         operator = fields.get("Operator", "")
         value = fields.get("Value", "")
 
-        op_map = {
-            "is equal to any of": "IS_ANY_OF",
-            "is not equal to any of": "IS_NONE_OF",
-            "is known": "IS_KNOWN",
-            "is unknown": "IS_UNKNOWN",
-        }
-        api_op = op_map.get(operator, operator.upper().replace(" ", "_"))
+        api_op = OPERATOR_MAP.get(operator, operator.upper().replace(" ", "_"))
 
         if api_op in ("IS_KNOWN", "IS_UNKNOWN"):
             op_type = "ALL_PROPERTY"

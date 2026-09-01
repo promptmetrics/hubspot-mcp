@@ -26,7 +26,7 @@ def test_package_imports():
 
 
 def test_registry_has_76_tools():
-    assert len(list_tools()) == 76
+    assert len(list_tools()) == 79
 
 
 def test_handlers_trimmed_to_tools_only():
@@ -38,7 +38,7 @@ async def test_server_registers_81_tools():
 
     tools = await server.mcp.list_tools()
     names = {t.name for t in tools}
-    assert len(tools) == 83  # 76 domain + 7 safety/status/route
+    assert len(tools) == 86  # 79 domain + 7 safety/status/route
     for safety in (
         "hubspot_approve_write",
         "hubspot_reject_write",

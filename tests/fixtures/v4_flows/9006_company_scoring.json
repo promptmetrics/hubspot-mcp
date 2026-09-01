@@ -1,0 +1,56 @@
+{
+  "id": "9006",
+  "isEnabled": true,
+  "objectTypeId": "0-2",
+  "flowType": "WORKFLOW",
+  "revisionId": "1",
+  "name": "Company Scoring — Deal Boost (+100)",
+  "description": "Sets the engagement score to 100 for companies with a known company name.",
+  "createdAt": "2026-05-07T06:10:27.722Z",
+  "updatedAt": "2026-05-07T06:10:27.722Z",
+  "startActionId": "1",
+  "nextAvailableActionId": "2",
+  "actions": [
+    {
+      "actionId": "1",
+      "actionTypeVersion": 0,
+      "actionTypeId": "0-5",
+      "fields": {
+        "property_name": "engagement_score_workflow",
+        "value": {
+          "staticValue": "100",
+          "type": "STATIC_VALUE"
+        }
+      },
+      "type": "SINGLE_CONNECTION"
+    }
+  ],
+  "enrollmentCriteria": {
+    "shouldReEnroll": false,
+    "listFilterBranch": {
+      "filterBranches": [],
+      "filters": [
+        {
+          "property": "name",
+          "operation": {
+            "operator": "IS_KNOWN",
+            "includeObjectsWithNoValueSet": false,
+            "operationType": "ALL_PROPERTY"
+          },
+          "filterType": "PROPERTY"
+        }
+      ],
+      "filterBranchType": "AND",
+      "filterBranchOperator": "AND"
+    },
+    "unEnrollObjectsNotMeetingCriteria": false,
+    "reEnrollmentTriggersFilterBranches": [],
+    "type": "LIST_BASED"
+  },
+  "timeWindows": [],
+  "blockedDates": [],
+  "customProperties": {},
+  "dataSources": [],
+  "crmObjectCreationStatus": "COMPLETE",
+  "type": "PLATFORM_FLOW"
+}

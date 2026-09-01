@@ -1,0 +1,87 @@
+{
+  "format_version": 1,
+  "name": "re_engagement",
+  "description": "Send a re-engagement email to contacts who have been inactive for a specified number of days.",
+  "tags": [
+    "email",
+    "contact",
+    "retention"
+  ],
+  "source": {
+    "origin": "shipped"
+  },
+  "notes": [],
+  "flags": [],
+  "parameters": {
+    "name": {
+      "type": "string",
+      "default": "Re-engagement Campaign",
+      "description": "Workflow name"
+    },
+    "inactive_days": {
+      "type": "integer",
+      "default": 90,
+      "description": "Days of inactivity before email is sent"
+    },
+    "subject": {
+      "type": "string",
+      "default": "We miss you!",
+      "description": "Email subject line"
+    },
+    "body": {
+      "type": "string",
+      "default": "It's been a while — here's what's new.",
+      "description": "Email body"
+    }
+  },
+  "spec": {
+    "ui_path": "Settings > Automation > Workflows > Create workflow",
+    "object_type": "Contact-based",
+    "enrollment": {
+      "type": "PROPERTY_BASED",
+      "filter_branch": {
+        "filterBranchType": "OR",
+        "filterBranches": [
+          {
+            "filterBranchType": "AND",
+            "filters": [
+              {
+                "filterType": "PROPERTY",
+                "property": "last_engagement_date",
+                "operation": {
+                  "operationType": "ALL_PROPERTY",
+                  "operator": "IS_KNOWN",
+                  "includeObjectsWithNoValueSet": false
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "actions": [
+      {
+        "step": 1,
+        "ui_action": "Delay",
+        "fields": {
+          "Delay for": "{{param:inactive_days}} days"
+        }
+      },
+      {
+        "step": 2,
+        "ui_action": "Send internal email notification",
+        "fields": {
+          "Subject": "{{param:subject}}",
+          "Body": "{{param:body}}"
+        }
+      }
+    ],
+    "prerequisites": [
+      "Contact property 'last_engagement_date' is active"
+    ],
+    "validation": [
+      "Create a test contact with last_engagement_date set",
+      "Verify email sent after delay"
+    ]
+  }
+}

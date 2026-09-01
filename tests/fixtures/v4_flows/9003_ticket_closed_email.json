@@ -1,0 +1,75 @@
+{
+  "id": "9003",
+  "isEnabled": true,
+  "objectTypeId": "0-5",
+  "flowType": "WORKFLOW",
+  "revisionId": "2",
+  "name": "Pipeline is \"Support Pipeline\", Ticket status is \"Closed\"",
+  "description": "Sends an email when a ticket in the Support Pipeline is closed and the source is not Chat.",
+  "uuid": "ticket-0-4",
+  "createdAt": "2026-05-05T08:17:32.123Z",
+  "updatedAt": "2026-05-05T08:17:32.350Z",
+  "startActionId": "1",
+  "nextAvailableActionId": "2",
+  "actions": [
+    {
+      "actionId": "1",
+      "actionTypeVersion": 0,
+      "actionTypeId": "0-4",
+      "fields": {
+        "content_id": "400567279818"
+      },
+      "type": "SINGLE_CONNECTION"
+    }
+  ],
+  "enrollmentCriteria": {
+    "shouldReEnroll": false,
+    "listFilterBranch": {
+      "filterBranches": [
+        {
+          "filterBranches": [],
+          "filters": [
+            {
+              "property": "hs_pipeline_stage",
+              "operation": {
+                "operator": "IS_ANY_OF",
+                "includeObjectsWithNoValueSet": false,
+                "values": [
+                  "4"
+                ],
+                "operationType": "ENUMERATION"
+              },
+              "filterType": "PROPERTY"
+            },
+            {
+              "property": "source_type",
+              "operation": {
+                "operator": "IS_NONE_OF",
+                "includeObjectsWithNoValueSet": false,
+                "values": [
+                  "CHAT"
+                ],
+                "operationType": "ENUMERATION"
+              },
+              "filterType": "PROPERTY"
+            }
+          ],
+          "filterBranchType": "AND",
+          "filterBranchOperator": "AND"
+        }
+      ],
+      "filters": [],
+      "filterBranchType": "OR",
+      "filterBranchOperator": "OR"
+    },
+    "unEnrollObjectsNotMeetingCriteria": false,
+    "reEnrollmentTriggersFilterBranches": [],
+    "type": "LIST_BASED"
+  },
+  "timeWindows": [],
+  "blockedDates": [],
+  "customProperties": {},
+  "dataSources": [],
+  "crmObjectCreationStatus": "COMPLETE",
+  "type": "PLATFORM_FLOW"
+}

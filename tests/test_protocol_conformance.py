@@ -51,7 +51,7 @@ async def test_tools_list_answers_when_unauthenticated(unauthenticated_server):
     """
     async with Client(unauthenticated_server.mcp) as client:
         result = await client.list_tools()
-        assert len(result.tools) == 83
+        assert len(result.tools) == 86
         assert "hubspot_get_object" in {t.name for t in result.tools}
 
 
@@ -101,4 +101,4 @@ async def test_serves_handshake_era_clients_too(unauthenticated_server):
     async with Client(unauthenticated_server.mcp, mode="legacy") as client:
         assert client.protocol_version != "2026-07-28"
         result = await client.list_tools()
-        assert len(result.tools) == 83
+        assert len(result.tools) == 86

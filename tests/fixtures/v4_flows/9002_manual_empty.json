@@ -1,0 +1,23 @@
+{
+  "id": "9002",
+  "isEnabled": false,
+  "objectTypeId": "0-5",
+  "flowType": "WORKFLOW",
+  "revisionId": "3",
+  "name": "Updated Name via PUT",
+  "description": "Sends an email when a ticket is new and its source is not chat.",
+  "createdAt": "2026-05-05T08:17:31.909Z",
+  "updatedAt": "2026-05-07T04:54:02.091Z",
+  "nextAvailableActionId": "2",
+  "actions": [],
+  "enrollmentCriteria": {
+    "shouldReEnroll": true,
+    "type": "MANUAL"
+  },
+  "timeWindows": [],
+  "blockedDates": [],
+  "customProperties": {},
+  "dataSources": [],
+  "crmObjectCreationStatus": "COMPLETE",
+  "type": "PLATFORM_FLOW"
+}

@@ -1,0 +1,62 @@
+{
+  "format_version": 1,
+  "name": "re_anniversary_touch",
+  "description": "Annual anniversary email and gift task for past clients.",
+  "tags": [
+    "real-estate",
+    "anniversary",
+    "retention",
+    "email"
+  ],
+  "source": {
+    "origin": "shipped"
+  },
+  "notes": [],
+  "flags": [],
+  "parameters": {},
+  "spec": {
+    "ui_path": "Settings > Automation > Workflows > Create workflow",
+    "object_type": "Contact-based",
+    "enrollment": {
+      "type": "LIST_BASED",
+      "trigger": "Contact is added to list",
+      "list_name": "[RE] Customers for Anniversary"
+    },
+    "actions": [
+      {
+        "step": 1,
+        "ui_action": "Delay until date",
+        "fields": {
+          "Delay until": "{{contact.anniversary_date}}"
+        }
+      },
+      {
+        "step": 2,
+        "ui_action": "Send marketing email",
+        "fields": {
+          "Email": "Happy Home-iversary!",
+          "content_id": "<create email first>"
+        }
+      },
+      {
+        "step": 3,
+        "ui_action": "Create task",
+        "fields": {
+          "Title": "Send anniversary card/gift",
+          "Due date": "{{timestamp + 3d}}",
+          "Assigned to": "{{contact.hubspot_owner_id}}",
+          "Priority": "Low"
+        }
+      }
+    ],
+    "prerequisites": [
+      "Static list '[RE] Customers for Anniversary' exists",
+      "Contact property 'anniversary_date' exists",
+      "Marketing email template created"
+    ],
+    "validation": [
+      "Add test contact with anniversary_date=today to the list",
+      "Verify email sends and task created"
+    ]
+  }
+}

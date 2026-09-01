@@ -1,0 +1,325 @@
+{
+  "id": "9005",
+  "isEnabled": true,
+  "objectTypeId": "0-2",
+  "flowType": "WORKFLOW",
+  "revisionId": "17",
+  "name": "Unnamed workflow - 2026-05-07 07:58:20 GMT+0000",
+  "description": "Updates engagement scores based on whether contacts have associated deals or tickets, increasing score for deals and decreasing for tickets accordingly.",
+  "createdAt": "2026-05-07T07:58:20.438Z",
+  "updatedAt": "2026-05-07T08:17:52.968Z",
+  "startActionId": "1",
+  "nextAvailableActionId": "12",
+  "actions": [
+    {
+      "actionId": "1",
+      "inputValue": {
+        "propertyName": "num_associated_deals",
+        "type": "OBJECT_PROPERTY"
+      },
+      "staticBranches": [
+        {
+          "branchValue": "1",
+          "connection": {
+            "edgeType": "STANDARD",
+            "nextActionId": "3"
+          }
+        }
+      ],
+      "defaultBranch": {
+        "edgeType": "STANDARD",
+        "nextActionId": "9"
+      },
+      "type": "STATIC_BRANCH"
+    },
+    {
+      "actionId": "2",
+      "actionTypeVersion": 0,
+      "actionTypeId": "0-5",
+      "connection": {
+        "edgeType": "STANDARD",
+        "nextActionId": "7"
+      },
+      "fields": {
+        "property_name": "engagement_score_workflow",
+        "value": {
+          "incrementAmount": 100.0,
+          "type": "INCREMENT"
+        }
+      },
+      "type": "SINGLE_CONNECTION"
+    },
+    {
+      "actionId": "3",
+      "actionTypeVersion": 0,
+      "actionTypeId": "0-5",
+      "connection": {
+        "edgeType": "STANDARD",
+        "nextActionId": "2"
+      },
+      "fields": {
+        "property_name": "engagement_score_workflow",
+        "value": {
+          "staticValue": "",
+          "type": "STATIC_VALUE"
+        }
+      },
+      "type": "SINGLE_CONNECTION"
+    },
+    {
+      "actionId": "7",
+      "listBranches": [
+        {
+          "filterBranch": {
+            "filterBranches": [
+              {
+                "filterBranches": [],
+                "filters": [
+                  {
+                    "property": "number_of_associated_tickets",
+                    "operation": {
+                      "operator": "IS_GREATER_THAN_OR_EQUAL_TO",
+                      "includeObjectsWithNoValueSet": false,
+                      "value": 1.0,
+                      "operationType": "NUMBER"
+                    },
+                    "filterType": "PROPERTY"
+                  }
+                ],
+                "filterBranchType": "AND",
+                "filterBranchOperator": "AND"
+              }
+            ],
+            "filters": [],
+            "filterBranchType": "OR",
+            "filterBranchOperator": "OR"
+          },
+          "connection": {
+            "edgeType": "STANDARD",
+            "nextActionId": "8"
+          }
+        }
+      ],
+      "type": "LIST_BRANCH"
+    },
+    {
+      "actionId": "8",
+      "actionTypeVersion": 0,
+      "actionTypeId": "0-5",
+      "fields": {
+        "property_name": "engagement_score_workflow",
+        "value": {
+          "incrementAmount": -20.0,
+          "type": "INCREMENT"
+        }
+      },
+      "type": "SINGLE_CONNECTION"
+    },
+    {
+      "actionId": "9",
+      "listBranches": [
+        {
+          "filterBranch": {
+            "filterBranches": [
+              {
+                "filterBranches": [],
+                "filters": [
+                  {
+                    "property": "number_of_associated_tickets",
+                    "operation": {
+                      "operator": "IS_GREATER_THAN_OR_EQUAL_TO",
+                      "includeObjectsWithNoValueSet": false,
+                      "value": 1.0,
+                      "operationType": "NUMBER"
+                    },
+                    "filterType": "PROPERTY"
+                  }
+                ],
+                "filterBranchType": "AND",
+                "filterBranchOperator": "AND"
+              }
+            ],
+            "filters": [],
+            "filterBranchType": "OR",
+            "filterBranchOperator": "OR"
+          },
+          "connection": {
+            "edgeType": "STANDARD",
+            "nextActionId": "11"
+          }
+        }
+      ],
+      "type": "LIST_BRANCH"
+    },
+    {
+      "actionId": "10",
+      "actionTypeVersion": 0,
+      "actionTypeId": "0-5",
+      "fields": {
+        "property_name": "engagement_score_workflow",
+        "value": {
+          "incrementAmount": -20.0,
+          "type": "INCREMENT"
+        }
+      },
+      "type": "SINGLE_CONNECTION"
+    },
+    {
+      "actionId": "11",
+      "actionTypeVersion": 0,
+      "actionTypeId": "0-5",
+      "connection": {
+        "edgeType": "STANDARD",
+        "nextActionId": "10"
+      },
+      "fields": {
+        "property_name": "engagement_score_workflow",
+        "value": {
+          "staticValue": "",
+          "type": "STATIC_VALUE"
+        }
+      },
+      "type": "SINGLE_CONNECTION"
+    }
+  ],
+  "enrollmentCriteria": {
+    "shouldReEnroll": true,
+    "listFilterBranch": {
+      "filterBranches": [
+        {
+          "filterBranches": [],
+          "filters": [
+            {
+              "property": "num_associated_deals",
+              "operation": {
+                "operator": "IS_GREATER_THAN_OR_EQUAL_TO",
+                "includeObjectsWithNoValueSet": false,
+                "value": 1.0,
+                "operationType": "NUMBER"
+              },
+              "filterType": "PROPERTY"
+            }
+          ],
+          "filterBranchType": "AND",
+          "filterBranchOperator": "AND"
+        },
+        {
+          "filterBranches": [],
+          "filters": [
+            {
+              "property": "number_of_associated_tickets",
+              "operation": {
+                "operator": "IS_GREATER_THAN_OR_EQUAL_TO",
+                "includeObjectsWithNoValueSet": false,
+                "value": 1.0,
+                "operationType": "NUMBER"
+              },
+              "filterType": "PROPERTY"
+            }
+          ],
+          "filterBranchType": "AND",
+          "filterBranchOperator": "AND"
+        }
+      ],
+      "filters": [],
+      "filterBranchType": "OR",
+      "filterBranchOperator": "OR"
+    },
+    "unEnrollObjectsNotMeetingCriteria": false,
+    "reEnrollmentTriggersFilterBranches": [
+      {
+        "filterBranches": [],
+        "filters": [
+          {
+            "property": "hs_name",
+            "operation": {
+              "operator": "IS_EQUAL_TO",
+              "includeObjectsWithNoValueSet": false,
+              "value": "number_of_associated_tickets",
+              "operationType": "STRING"
+            },
+            "filterType": "PROPERTY"
+          },
+          {
+            "property": "hs_value",
+            "operation": {
+              "operator": "IS_GREATER_THAN_OR_EQUAL_TO",
+              "includeObjectsWithNoValueSet": false,
+              "value": 1.0,
+              "operationType": "NUMBER"
+            },
+            "filterType": "PROPERTY"
+          }
+        ],
+        "filterBranchType": "AND",
+        "filterBranchOperator": "AND"
+      },
+      {
+        "filterBranches": [],
+        "filters": [
+          {
+            "property": "hs_name",
+            "operation": {
+              "operator": "IS_EQUAL_TO",
+              "includeObjectsWithNoValueSet": false,
+              "value": "num_associated_deals",
+              "operationType": "STRING"
+            },
+            "filterType": "PROPERTY"
+          },
+          {
+            "property": "hs_value",
+            "operation": {
+              "operator": "IS_GREATER_THAN_OR_EQUAL_TO",
+              "includeObjectsWithNoValueSet": false,
+              "value": 1.0,
+              "operationType": "NUMBER"
+            },
+            "filterType": "PROPERTY"
+          }
+        ],
+        "filterBranchType": "AND",
+        "filterBranchOperator": "AND"
+      }
+    ],
+    "type": "LIST_BASED"
+  },
+  "timeWindows": [],
+  "blockedDates": [],
+  "customProperties": {},
+  "dataSources": [
+    {
+      "name": "fetched_object_1621936357",
+      "objectTypeId": "0-1",
+      "associationTypeId": 280,
+      "associationCategory": "HUBSPOT_DEFINED",
+      "sortBy": {
+        "property": "hs_lastmodifieddate",
+        "missing": null,
+        "order": "DESC"
+      },
+      "type": "ASSOCIATION"
+    },
+    {
+      "name": "fetched_object_1621936358",
+      "objectTypeId": "0-1",
+      "associationTypeId": 280,
+      "associationCategory": "HUBSPOT_DEFINED",
+      "type": "ASSOCIATION"
+    },
+    {
+      "name": "fetched_object_1621936359",
+      "objectTypeId": "0-3",
+      "associationTypeId": 6,
+      "associationCategory": "HUBSPOT_DEFINED",
+      "sortBy": {
+        "property": "hs_lastmodifieddate",
+        "missing": null,
+        "order": "DESC"
+      },
+      "type": "ASSOCIATION"
+    }
+  ],
+  "crmObjectCreationStatus": "COMPLETE",
+  "type": "PLATFORM_FLOW"
+}
