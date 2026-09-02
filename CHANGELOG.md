@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Phase 3 — stage 1: the Vercel entrypoint moves to `api/`
+
+- **`app.py` → `api/index.py`.** With Framework Preset "Other" Vercel treats the
+  repo as a Node project — install command `npm install`, build command
+  `npm run build` — so a root-level entrypoint and `[tool.vercel] entrypoint`
+  are never consulted, `pip` never runs, and the build "succeeds" in ~100ms
+  having produced nothing. The `api/` directory is the only layout the Python
+  runtime picks up without a detected backend framework, and it is what a
+  `functions` pattern must target.
+- **A catch-all rewrite** sends every path to that function; without it only
+  `/api/index` would reach the app, not `/mcp`, `/healthz` or the connect routes.
+- `.gitignore` now covers `.vercel` and `.env*` — `vercel link` writes a
+  `.env.local` holding pulled environment values.
+
 ### Phase 3 — stage 1: fix the Vercel deployment
 
 - **`HOME` cannot be set in `vercel.json`.** It is a reserved key, and Vercel
