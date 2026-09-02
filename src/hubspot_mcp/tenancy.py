@@ -143,3 +143,48 @@ def enforce_no_ambient_portal(env: dict[str, str] | None = None) -> None:
         raise AmbientPortalConfigured(
             f"Refusing to serve a multi-tenant deployment with an ambient portal:\n{detail}"
         )
+
+
+class EphemeralStateOnHostedDeployment(RuntimeError):
+    """Raised when a hosted deployment would keep its state on local disk."""
+
+
+def enforce_durable_state(env: dict[str, str] | None = None) -> None:
+    """Verify a hosted deployment has somewhere durable to keep its state.
+
+    Without ``REDIS_URL`` the state store falls back to local disk. On a
+    serverless host that filesystem is per-instance and disappears, so the
+    failure is not a crash — it is a preview minted on one instance being
+    invisible to the approve that follows, intermittently, depending on which
+    instance answers. A write gate that loses previews is worse than no gate,
+    because the operator believes there is one.
+
+    A prefixed environment variable is the likeliest cause: a Vercel Redis
+    integration connected with a custom prefix injects ``<PREFIX>_REDIS_URL``,
+    which nothing reads.
+    """
+    source = env if env is not None else os.environ
+    backend = (source.get("HUBSPOT_MCP_STATE_BACKEND") or "").strip().lower()
+
+    if backend == "redis" or (source.get("REDIS_URL") or "").strip():
+        return
+    if backend == "file":
+        # Explicit and deliberate — someone who typed this knows what they want.
+        return
+
+    hint = ""
+    prefixed = [name for name in source if name.endswith("_REDIS_URL")]
+    if prefixed:
+        hint = (
+            f" Found {', '.join(sorted(prefixed))}, which nothing reads — a Redis "
+            "integration connected with a custom prefix renames the variable. "
+            "Reconnect it with no prefix, or copy the value to REDIS_URL."
+        )
+
+    raise EphemeralStateOnHostedDeployment(
+        "Refusing to serve a hosted deployment with no REDIS_URL. State would fall back "
+        "to local disk, which on a serverless host is per-instance and disappears — a "
+        "write preview minted on one instance would be invisible to the approve that "
+        "follows, intermittently. Set HUBSPOT_MCP_STATE_BACKEND=file to override "
+        "deliberately." + hint
+    )

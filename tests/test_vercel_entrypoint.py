@@ -16,6 +16,8 @@ import pytest
 
 ISSUER = "https://tolerant-climb-38-staging.authkit.app"
 PUBLIC_URL = "https://hubspot-mcp-promptmetrics.vercel.app"
+# Never connected to — importing the entrypoint only checks the variable exists.
+REDIS_URL = "redis://localhost:6379/0"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -25,7 +27,7 @@ def _import_entrypoint(**env: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         cwd=ROOT,
-        env={"PATH": "/usr/bin:/bin", "HOME": "/tmp", **env},
+        env={"PATH": "/usr/bin:/bin", "HOME": "/tmp", "REDIS_URL": REDIS_URL, **env},
     )
 
 
@@ -99,9 +101,63 @@ def test_functions_run_in_the_same_region_as_redis(vercel_config):
     assert vercel_config["regions"] == ["fra1"]
 
 
-def test_home_is_redirected_to_a_writable_path(vercel_config):
-    """The schema cache and trace log still write to disk; only /tmp is writable."""
-    assert vercel_config["env"]["HOME"] == "/tmp"
+def test_no_reserved_env_keys_in_the_config():
+    """Vercel refuses the WHOLE deployment on a reserved key, before any build.
+
+    `HOME` was set here once; every deployment was rejected at config validation
+    and the symptom was a production domain serving 404s, which looks like a
+    routing problem and is not one.
+    """
+    import json
+    import pathlib
+
+    config = json.loads((pathlib.Path(__file__).resolve().parent.parent / "vercel.json").read_text())
+    reserved = {"HOME", "PATH", "PORT", "NOW_REGION", "VERCEL", "VERCEL_ENV", "VERCEL_URL", "AWS_REGION"}
+    declared = set(config.get("env", {}))
+    assert not (declared & reserved), f"reserved keys in vercel.json env: {declared & reserved}"
+
+
+def test_home_is_redirected_in_process_not_in_config():
+    """`Path.home()` is resolved by nine modules; $HOME covers all of them."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import os, app; print(os.environ['HOME'])",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": "/nonexistent-readonly",
+            "VERCEL": "1",
+            "REDIS_URL": REDIS_URL,
+            "HUBSPOT_MCP_OAUTH_ISSUER": ISSUER,
+            "HUBSPOT_MCP_PUBLIC_URL": PUBLIC_URL,
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "/tmp"
+
+
+def test_home_is_left_alone_off_vercel():
+    """Nothing should rewrite $HOME on a developer's machine."""
+    result = subprocess.run(
+        [sys.executable, "-c", "import os, app; print(os.environ['HOME'])"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": "/tmp/not-vercel",
+            "REDIS_URL": REDIS_URL,
+            "HUBSPOT_MCP_OAUTH_ISSUER": ISSUER,
+            "HUBSPOT_MCP_PUBLIC_URL": PUBLIC_URL,
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "/tmp/not-vercel"
 
 
 def test_tests_are_excluded_from_the_bundle(vercel_config):
@@ -119,3 +175,26 @@ def test_requirements_installs_the_hosted_extra():
     """Without the extra there is no redis, no cryptography and no JWT verification."""
     requirements = (ROOT / "requirements.txt").read_text()
     assert ".[hosted]" in requirements
+
+
+def test_the_entrypoint_refuses_a_hosted_deployment_with_no_redis():
+    """Falling back to local disk here loses previews between instances, silently."""
+    result = _import_entrypoint(
+        HUBSPOT_MCP_OAUTH_ISSUER=ISSUER,
+        HUBSPOT_MCP_PUBLIC_URL=PUBLIC_URL,
+        REDIS_URL="",
+    )
+    assert result.returncode != 0
+    assert "REDIS_URL" in result.stderr
+
+
+def test_a_prefixed_redis_url_is_named_in_the_refusal():
+    """A Vercel Redis integration connected with a custom prefix renames it."""
+    result = _import_entrypoint(
+        HUBSPOT_MCP_OAUTH_ISSUER=ISSUER,
+        HUBSPOT_MCP_PUBLIC_URL=PUBLIC_URL,
+        REDIS_URL="",
+        HSMCP_REDIS_URL="redis://localhost:6379/0",
+    )
+    assert result.returncode != 0
+    assert "HSMCP_REDIS_URL" in result.stderr

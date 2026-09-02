@@ -10,6 +10,22 @@ that), it is the signal that this deployment is internet-reachable, which puts
 every guard into its strict mode rather than the permissive one loopback gets.
 """
 
-from hubspot_mcp.server import build_http_app
+import os
+
+# Redirect the home directory to the one writable path on a serverless host,
+# BEFORE importing anything from `hubspot_mcp`.
+#
+# Nine modules resolve `Path.home()` for the schema cache, checkpoints, progress
+# and blueprint files, and `config.CONFIG_DIR` binds it at import. Setting $HOME
+# here covers all of them at once — `Path.home()` reads it — where a per-module
+# override would not, and would be nine chances to miss one.
+#
+# It has to happen in the process rather than in `vercel.json`, because Vercel
+# rejects `HOME` as a reserved key in its env configuration and refuses the
+# whole deployment.
+if os.environ.get("VERCEL"):
+    os.environ["HOME"] = "/tmp"  # noqa: S108 — the one writable path on the host
+
+from hubspot_mcp.server import build_http_app  # noqa: E402 — must follow the $HOME redirect
 
 app = build_http_app("0.0.0.0")  # noqa: S104 — see the module docstring

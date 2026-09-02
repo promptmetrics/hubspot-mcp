@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Phase 3 — stage 1: fix the Vercel deployment
+
+- **`HOME` cannot be set in `vercel.json`.** It is a reserved key, and Vercel
+  refuses the *entire deployment* at config validation — no build runs, and the
+  production domain serves 404s that look exactly like a routing problem.
+  `app.py` now redirects `$HOME` to `/tmp` in-process when `VERCEL` is set,
+  before importing anything that reads it. That covers all nine modules
+  resolving `Path.home()` plus `config.CONFIG_DIR`, where a per-module override
+  would have been nine chances to miss one.
+- **A hosted deployment now refuses to start without `REDIS_URL`.** Otherwise
+  the state store falls back to local disk, which on a serverless host is
+  per-instance and disappears — a preview minted on one instance is invisible to
+  the approve that follows, intermittently. A write gate that loses previews is
+  worse than no gate, because the operator believes there is one. The refusal
+  names any `*_REDIS_URL` it finds, since a Redis integration connected with a
+  custom prefix is the likeliest cause.
+
 ### Phase 3 — stage 1: Vercel deployment
 
 - **`app.py`, `vercel.json` and `requirements.txt`.** Vercel imports the ASGI
