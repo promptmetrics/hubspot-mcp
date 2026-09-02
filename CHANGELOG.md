@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Phase 3 — stage 1: the HubSpot app as code
+
+- **`hubspot-app/`** holds the HubSpot app definition, created with
+  `hs project create` and uploaded with `hs project upload`. It is in the repo
+  so the scopes it requires and the scopes the server requests at authorize time
+  are one set, checked by a test: an app requiring a scope the authorize call
+  omits **fails to install**, and an app missing a scope a tool needs fails at
+  the first call with a 403 — both a long way from the mistake.
+- **Four scopes we were requesting do not exist.** `crm.objects.tickets.*`
+  and `crm.schemas.tickets.*` are not HubSpot scopes — tickets sit outside
+  the CRM object scope family under one umbrella `tickets` scope, which we
+  already request. They stay in the registry, because a `.write` suffix is
+  what classifies a ticket write as a write, and are dropped only from what
+  we ask HubSpot to grant. Found by the app deploy: "The scope
+  crm.objects.tickets.write could not be recognized."
+- **`authorize_scopes()` now includes `oauth`.** HubSpot's own scope for OAuth
+  access, which `hs project create --auth oauth` scaffolds into `requiredScopes`
+  and which we were not requesting. 27 scopes became 28.
+- Support contact details in the app config are **deliberately implausible
+  placeholders** — HubSpot verifies they are live before approving a listing, so
+  they must be impossible to ship by accident.
 ### Phase 3 — stage 1: the Vercel entrypoint moves to `api/`
 
 - **`app.py` → `api/index.py`.** With Framework Preset "Other" Vercel treats the
