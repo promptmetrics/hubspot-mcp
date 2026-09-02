@@ -11,6 +11,10 @@
   before importing anything that reads it. That covers all nine modules
   resolving `Path.home()` plus `config.CONFIG_DIR`, where a per-module override
   would have been nine chances to miss one.
+- **The `functions` block is gone.** Its keys must target `api/`; a root-level
+  entrypoint plus a `functions` block fails with "doesn't match any Serverless
+  Functions inside the `api` directory". Bundle exclusions moved to
+  `.vercelignore`, which does the same job with valid config.
 - **A hosted deployment now refuses to start without `REDIS_URL`.** Otherwise
   the state store falls back to local disk, which on a serverless host is
   per-instance and disappears — a preview minted on one instance is invisible to

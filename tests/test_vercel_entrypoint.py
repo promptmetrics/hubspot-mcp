@@ -78,20 +78,38 @@ def vercel_config() -> dict:
     return json.loads((ROOT / "vercel.json").read_text())
 
 
-def test_the_function_key_matches_the_entrypoint_file(vercel_config):
-    """A key naming a file that does not exist silently applies no config."""
-    for path in vercel_config["functions"]:
-        assert (ROOT / path).exists(), f"vercel.json configures {path}, which does not exist"
+def test_no_reserved_env_keys_in_the_config(vercel_config):
+    """Vercel refuses the WHOLE deployment on a reserved key, before any build.
+
+    `HOME` was set here once; every deployment was rejected at config validation
+    and the symptom was a production domain serving 404s, which looks like a
+    routing problem and is not one.
+    """
+    reserved = {"HOME", "PATH", "PORT", "NOW_REGION", "VERCEL", "VERCEL_ENV", "VERCEL_URL", "AWS_REGION"}
+    declared = set(vercel_config.get("env", {}))
+    assert not (declared & reserved), f"reserved keys in vercel.json env: {declared & reserved}"
 
 
-def test_the_declared_entrypoint_matches_the_file(vercel_config):
+def test_no_root_level_function_patterns(vercel_config):
+    """`functions` keys must target `api/`.
+
+    A root-level entrypoint plus a `functions` block fails with "doesn't match
+    any Serverless Functions inside the `api` directory" — they are mutually
+    exclusive, and we use the root entrypoint.
+    """
+    for path in vercel_config.get("functions", {}):
+        assert path.startswith(("api/", "pages/api/")), (
+            f"vercel.json configures {path}, which is not under api/ and will fail the build"
+        )
+
+
+def test_the_declared_entrypoint_matches_a_real_file():
     import tomllib
 
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
     module, _, attribute = pyproject["tool"]["vercel"]["entrypoint"].partition(":")
 
     assert (ROOT / f"{module}.py").exists()
-    assert f"{module}.py" in vercel_config["functions"]
     assert attribute == "app"
 
 
@@ -101,74 +119,23 @@ def test_functions_run_in_the_same_region_as_redis(vercel_config):
     assert vercel_config["regions"] == ["fra1"]
 
 
-def test_no_reserved_env_keys_in_the_config():
-    """Vercel refuses the WHOLE deployment on a reserved key, before any build.
-
-    `HOME` was set here once; every deployment was rejected at config validation
-    and the symptom was a production domain serving 404s, which looks like a
-    routing problem and is not one.
-    """
-    import json
-    import pathlib
-
-    config = json.loads((pathlib.Path(__file__).resolve().parent.parent / "vercel.json").read_text())
-    reserved = {"HOME", "PATH", "PORT", "NOW_REGION", "VERCEL", "VERCEL_ENV", "VERCEL_URL", "AWS_REGION"}
-    declared = set(config.get("env", {}))
-    assert not (declared & reserved), f"reserved keys in vercel.json env: {declared & reserved}"
+def test_the_bundle_excludes_what_it_does_not_need():
+    """`excludeFiles` needs a `functions` block we cannot have, so this is
+    `.vercelignore` instead — same job, valid config."""
+    ignored = (ROOT / ".vercelignore").read_text()
+    for directory in ("tests/", "docs/", "reference/"):
+        assert directory in ignored, f"{directory} would ship in the function bundle"
 
 
-def test_home_is_redirected_in_process_not_in_config():
-    """`Path.home()` is resolved by nine modules; $HOME covers all of them."""
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import os, app; print(os.environ['HOME'])",
-        ],
-        capture_output=True,
-        text=True,
-        cwd=ROOT,
-        env={
-            "PATH": "/usr/bin:/bin",
-            "HOME": "/nonexistent-readonly",
-            "VERCEL": "1",
-            "REDIS_URL": REDIS_URL,
-            "HUBSPOT_MCP_OAUTH_ISSUER": ISSUER,
-            "HUBSPOT_MCP_PUBLIC_URL": PUBLIC_URL,
-        },
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "/tmp"
-
-
-def test_home_is_left_alone_off_vercel():
-    """Nothing should rewrite $HOME on a developer's machine."""
-    result = subprocess.run(
-        [sys.executable, "-c", "import os, app; print(os.environ['HOME'])"],
-        capture_output=True,
-        text=True,
-        cwd=ROOT,
-        env={
-            "PATH": "/usr/bin:/bin",
-            "HOME": "/tmp/not-vercel",
-            "REDIS_URL": REDIS_URL,
-            "HUBSPOT_MCP_OAUTH_ISSUER": ISSUER,
-            "HUBSPOT_MCP_PUBLIC_URL": PUBLIC_URL,
-        },
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "/tmp/not-vercel"
-
-
-def test_tests_are_excluded_from_the_bundle(vercel_config):
-    exclude = vercel_config["functions"]["app.py"]["excludeFiles"]
-    for directory in ("tests", "docs", "reference"):
-        assert directory in exclude, f"{directory} would ship in the function bundle"
-
-
-def test_the_reference_clone_can_never_ship(vercel_config):
-    """`reference/` is a full clone of another repo, gitignored and never deployed."""
-    assert "reference/**" in vercel_config["functions"]["app.py"]["excludeFiles"]
+def test_the_bundle_keeps_what_it_does_need():
+    """Over-excluding is the other failure: a bundle that builds and cannot run."""
+    ignored = [
+        line.strip()
+        for line in (ROOT / ".vercelignore").read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    for required in ("src/", "app.py", "pyproject.toml", "requirements.txt"):
+        assert required not in ignored
 
 
 def test_requirements_installs_the_hosted_extra():

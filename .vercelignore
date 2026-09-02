@@ -1,0 +1,16 @@
+# Keep the function bundle to the server and its dependencies.
+#
+# Not `functions.excludeFiles` in vercel.json: that key only accepts patterns
+# under `api/`, and a root-level entrypoint (see `[tool.vercel]` in
+# pyproject.toml) fails the build with "doesn't match any Serverless Functions
+# inside the `api` directory".
+tests/
+docs/
+scripts/
+.github/
+reference/
+skills/
+hooks/
+bin/
+.claude/
+.claude-plugin/
