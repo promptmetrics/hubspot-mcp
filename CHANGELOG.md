@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Phase 3 — stage 1: Vercel deployment
+
+- **`app.py`, `vercel.json` and `requirements.txt`.** Vercel imports the ASGI
+  app rather than calling `run`, which is why every guard lives in
+  `build_http_app`. `requirements.txt` installs `.[hosted]`, so the dependency
+  set stays defined once in `pyproject.toml`.
+- **The single-tenant guard inverts under hosted OAuth.** Serving many portals
+  is the point, so `enforce_no_ambient_portal` replaces it and refuses to start
+  when `HUBSPOT_PORTAL` or any `HUBSPOT_TOKEN_*` is set. On a multi-tenant
+  deployment a process-wide portal is not a fallback — it is another customer's
+  CRM behind any path that fails to resolve the caller.
+- `HOME=/tmp` is set in `vercel.json`: the schema cache and trace log still
+  write to local disk and only `/tmp` is writable on a serverless host.
+- `reference/**` is excluded from the function bundle, alongside tests and docs.
+
 ### Phase 3 — stage 1: per-caller session resolution
 
 The hosted path now resolves the HubSpot session **per request** from the

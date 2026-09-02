@@ -1,0 +1,4 @@
+# Vercel installs from this file. `.[hosted]` builds the project itself plus the
+# hosted extra (redis, cryptography, pyjwt), so the dependency set stays defined
+# in pyproject.toml with nothing duplicated here to drift.
+.[hosted]

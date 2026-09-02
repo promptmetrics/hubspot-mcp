@@ -925,12 +925,20 @@ def build_http_app(host: str = "127.0.0.1") -> Any:
     the uvicorn branch below, or the hosted deployment would serve unguarded.
     """
     from hubspot_mcp.auth.bearer_middleware import BearerAuthMiddleware, resolve_server_secret
-    from hubspot_mcp.tenancy import enforce_single_tenant
+    from hubspot_mcp.tenancy import enforce_no_ambient_portal, enforce_single_tenant
 
-    # Both checks run before the app is built, so a misconfigured deployment
-    # fails at startup rather than on its first request.
-    portal_id, source = _resolve_portal_source()
-    enforce_single_tenant(host, portal_id, source)
+    # Checks run before the app is built, so a misconfigured deployment fails at
+    # startup rather than on its first request.
+    if _TOKEN_VERIFIER is None:
+        # Single-portal deployment: refuse to serve an ambiguous configuration.
+        portal_id, source = _resolve_portal_source()
+        enforce_single_tenant(host, portal_id, source)
+    else:
+        # Hosted: serving many portals is the point, so the single-tenant guard
+        # inverts. The portal is a property of the caller's token, and
+        # `hosted_session` resolves it per request — nothing may fall back to a
+        # process-wide portal, which would be somebody else's CRM.
+        enforce_no_ambient_portal()
 
     app = mcp.streamable_http_app(streamable_http_path=MCP_PATH, host=host)
 
