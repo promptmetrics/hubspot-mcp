@@ -32,3 +32,6 @@ reference/
 # `.env.local` containing pulled environment values.
 .vercel
 .env*
+
+# HubSpot CLI config — contains a personal access key.
+hubspot.config.yml
