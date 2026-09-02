@@ -105,15 +105,19 @@ provider swappable.
    it is free at any scale.
 2. Enable **AuthKit** and turn on the sign-in methods you want. Email plus
    Google is enough for the team.
-3. **Enable Dynamic Client Registration**: *Connect* → *Configuration*. WorkOS
-   supports Client ID Metadata Documents natively; DCR is the fallback for MCP
-   clients that do not yet speak CIMD, and we do not know which Claude uses.
+3. **Enable Client ID Metadata Document (CIMD)**: *Connect* → *Configuration*.
+   **It is off by default and nothing works without it** — CIMD is how a Claude
+   client registers itself on first connect, with no client id for anyone to
+   paste. Enable **Dynamic Client Registration** on the same page too: it costs
+   nothing and covers older clients.
 4. **Add a Resource Indicator** for the deployment URL — `https://<domain>`,
-   no path, no trailing slash. AuthKit then issues tokens with an `aud` claim
-   matching it, which is what lets our server prove a token was minted *for us*.
-   The MCP spec requires that check; without it a token issued for some other
-   resource would be accepted here. Mark it the default so clients that omit
-   the `resource` parameter still get a bound token.
+   no path, no trailing slash, in the same *Connect* area. AuthKit then issues
+   tokens whose `aud` claim matches it, which is what lets our server prove a
+   token was minted *for us*; without it a token issued for some other MCP
+   server would be accepted here, which the spec exists to prevent. Mark it the
+   default (the `...` menu) so clients that omit the `resource` parameter still
+   get a bound token. You can register several — staging and production can
+   coexist.
 5. Copy the **AuthKit domain** — the issuer, of the form
    `https://<something>.authkit.app`.
 
@@ -181,10 +185,11 @@ curl -i "https://<domain>/connect/hubspot?ticket=nope"
 
 Then in Cowork: *Customize → Connectors*, add `https://<domain>/mcp`.
 
-**Watch what happens at the login step.** This is the open question in the plan:
-if Cowork registers itself via DCR, onboarding scales. If it asks you to paste an
-OAuth Client ID and Secret, stage 1 is unaffected but stage 3 needs a different
-answer. Tell me which you see.
+**Watch what happens at the login step.** WorkOS documents Claude Code
+registering itself via CIMD with nothing to paste, which is what makes stage 3
+viable — but that is documented for Claude Code, not Cowork specifically. If
+Cowork instead asks for an OAuth Client ID and Secret, stage 1 still works and
+stage 3 needs rethinking. Say which you see.
 
 Then run the connect tool, authorise a sandbox portal, and confirm a read
 (`hubspot_search_objects`), a gated write with approval, and an undo.
