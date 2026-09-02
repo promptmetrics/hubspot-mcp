@@ -167,6 +167,17 @@ none should be shared. The server verifies tokens against the public JWKS at
 2. Add a **Redis** store from the Marketplace (Upstash or Redis Cloud — either
    works; the code speaks the Redis protocol and reads a single `REDIS_URL`).
    The integration injects `REDIS_URL` automatically.
+
+   - **Storage is not the constraint.** Pending previews expire in 24h,
+     snapshots in 7 days, the audit log is capped at 1000 entries per portal and
+     the docs index is one key of roughly a megabyte. A free tier is ample.
+   - **Region matters more than size.** `vercel.json` pins functions to `fra1`
+     (Frankfurt), so create the store there. Vercel otherwise defaults to
+     Washington DC, and an approve makes about six Redis round trips — an
+     Atlantic crossing each costs roughly half a second per write. If you move
+     the store, move `regions` in `vercel.json` with it.
+   - On Redis Cloud the free plan only appears once **High Availability** is set
+     to **None**; the form says so, quietly.
 3. Generate the state encryption key locally and paste it in — it must never be
    generated in CI or committed:
    ```sh
