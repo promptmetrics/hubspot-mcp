@@ -37,8 +37,8 @@ def _build_default_store() -> StateStore:
     if backend == "file":
         return FileStateStore()
     if backend == "redis" or (not backend and os.environ.get("REDIS_URL", "").strip()):
-        # Imported here, not at module scope: `redis` and `cryptography` are the
-        # `[redis]` extra, and the stdio plugin install does not have them.
+        # Imported here rather than at module scope so the stdio path does not
+        # pay redis's import cost for a backend it never selects.
         from hubspot_mcp.state.redis_store import RedisStateStore
 
         return RedisStateStore.from_url()

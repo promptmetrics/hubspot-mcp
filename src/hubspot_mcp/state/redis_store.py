@@ -43,9 +43,8 @@ from hubspot_mcp.state.connection_store import (
     subject_key,
 )
 
-# `redis` and `cryptography` are the `[redis]` extra, not core dependencies.
 # Nothing imports this module unless the Redis backend is selected, so the
-# stdio plugin path never pays for them — see `hubspot_mcp.state.get_store`.
+# stdio path never pays its import cost — see `hubspot_mcp.state.get_store`.
 
 URL_ENV = "REDIS_URL"
 KEY_ENV = "HUBSPOT_MCP_STATE_KEY"  # noqa: S105 — the env var name, not a secret

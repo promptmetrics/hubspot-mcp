@@ -139,10 +139,25 @@ def test_the_bundle_keeps_what_it_does_need():
         assert required not in ignored
 
 
-def test_requirements_installs_the_hosted_extra():
-    """Without the extra there is no redis, no cryptography and no JWT verification."""
-    requirements = (ROOT / "requirements.txt").read_text()
-    assert ".[hosted]" in requirements
+def test_runtime_dependencies_are_not_optional():
+    """Vercel installs `[project.dependencies]` from pyproject.toml — not the
+    extras, and not requirements.txt.
+
+    They were an optional `hosted` extra once. The deployment authenticated
+    correctly and then failed every tool call on `No module named 'redis'`,
+    because an extra is exactly the thing Vercel does not install.
+    """
+    import tomllib
+
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    declared = " ".join(pyproject["project"]["dependencies"])
+    for package in ("redis", "cryptography", "pyjwt"):
+        assert package in declared, f"{package} is not a runtime dependency; the deploy will not have it"
+
+
+def test_no_requirements_txt_implying_otherwise():
+    """It was ignored in favour of pyproject.toml, so its presence only misled."""
+    assert not (ROOT / "requirements.txt").exists()
 
 
 def test_the_entrypoint_refuses_a_hosted_deployment_with_no_redis():

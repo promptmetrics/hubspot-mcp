@@ -133,8 +133,11 @@ none should be shared. The server verifies tokens against the public JWKS at
 
 1. Create a project from this repository. Framework preset: **Other**. The
    entrypoint, function config and dependency install are already committed —
-   `api/index.py`, `vercel.json` and `requirements.txt` — so there is nothing
-   to configure in the build settings.
+   `api/index.py` and `vercel.json` — so there is nothing to configure in the
+   build settings. Vercel installs `[project.dependencies]` from
+   `pyproject.toml`; it does **not** read `requirements.txt` and does **not**
+   install optional extras, which is why the hosted dependencies are declared
+   as ordinary runtime dependencies.
 2. Add a **Redis** store from the Marketplace (Upstash or Redis Cloud — either
    works; the code speaks the Redis protocol and reads a single `REDIS_URL`).
    The integration injects `REDIS_URL` automatically.
