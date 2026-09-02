@@ -411,11 +411,19 @@ RAW_API_WRITE_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELE
 _HIDDEN_SCOPE_OBJECTS = ("notes", "calls", "tasks", "emails")
 
 
+# HubSpot's own scope for OAuth access itself. Every OAuth app declares it --
+# `hs project create --auth oauth` scaffolds it into `requiredScopes` -- and an
+# install fails if the app requires a scope the authorize call does not request,
+# so it belongs in both. It grants nothing on its own.
+_OAUTH_SCOPE = "oauth"
+
+
 def authorize_scopes() -> list[str]:
     """The exact scope set to request at authorize time.
 
     Derived from the tool registry rather than hardcoded, so a new tool cannot
-    silently under-provision the OAuth grant. Two exclusions, both deliberate:
+    silently under-provision the OAuth grant. Plus ``oauth`` itself. Two
+    exclusions, both deliberate:
 
     * ``.delete`` scopes are never requested (R4, least privilege). Deleting is
       still possible for a portal that granted them out of band; we just do not
@@ -434,4 +442,5 @@ def authorize_scopes() -> list[str]:
     def _hidden(scope: str) -> bool:
         return any(scope.startswith(f"crm.objects.{o}.") for o in _HIDDEN_SCOPE_OBJECTS)
 
-    return sorted(s for s in found if not s.endswith(".delete") and not _hidden(s))
+    granted = {s for s in found if not s.endswith(".delete") and not _hidden(s)}
+    return sorted(granted | {_OAUTH_SCOPE})

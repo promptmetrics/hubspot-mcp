@@ -1,0 +1,60 @@
+{
+  "uid": "hubspot_mcp_app",
+  "type": "app",
+  "config": {
+    "name": "PromptMetrics MCP",
+    "description": "Connects HubSpot to AI assistants over the Model Context Protocol. Every write is previewed and requires human approval before it reaches HubSpot, and each approved write records an undo snapshot and an audit entry.",
+    "distribution": "marketplace",
+    "auth": {
+      "type": "oauth",
+      "redirectUrls": [
+        "https://hubspot-mcp.promptmetrics.dev/connect/hubspot/callback"
+      ],
+      "requiredScopes": [
+        "automation",
+        "crm.lists.read",
+        "crm.lists.write",
+        "crm.objects.appointments.read",
+        "crm.objects.appointments.write",
+        "crm.objects.companies.read",
+        "crm.objects.companies.write",
+        "crm.objects.contacts.read",
+        "crm.objects.contacts.write",
+        "crm.objects.deals.read",
+        "crm.objects.deals.write",
+        "crm.objects.tickets.read",
+        "crm.objects.tickets.write",
+        "crm.pipelines.orders.read",
+        "crm.pipelines.orders.write",
+        "crm.schemas.companies.read",
+        "crm.schemas.companies.write",
+        "crm.schemas.contacts.read",
+        "crm.schemas.contacts.write",
+        "crm.schemas.deals.read",
+        "crm.schemas.deals.write",
+        "crm.schemas.tickets.read",
+        "crm.schemas.tickets.write",
+        "oauth",
+        "sales-email-read",
+        "settings.users.read",
+        "settings.users.write",
+        "tickets"
+      ],
+      "optionalScopes": [],
+      "conditionallyRequiredScopes": []
+    },
+    "permittedUrls": {
+      "fetch": [
+        "https://api.hubapi.com"
+      ],
+      "iframe": [],
+      "img": []
+    },
+    "support": {
+      "supportEmail": "REPLACE_BEFORE_LISTING@example.com",
+      "documentationUrl": "https://github.com/promptmetrics/hubspot-mcp#readme",
+      "supportUrl": "https://github.com/promptmetrics/hubspot-mcp/issues",
+      "supportPhone": "+10000000000"
+    }
+  }
+}
