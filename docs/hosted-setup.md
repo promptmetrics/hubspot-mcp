@@ -170,6 +170,12 @@ none should be shared. The server verifies tokens against the public JWKS at
 | `HUBSPOT_MCP_PUBLIC_URL` | `https://<your-domain>` | Builds the redirect URI. Must match §1 byte for byte |
 | `HUBSPOT_MCP_STATE_KEY` | from step 3 | Encrypts pending previews, undo snapshots and refresh tokens at rest |
 | `REDIS_URL` | injected by the integration | Selects the Redis backend automatically; no second variable to forget |
+| `HUBSPOT_MCP_OAUTH_ISSUER` | the AuthKit issuer from §2 | Turns on per-request OAuth. **Setting this replaces the shared-secret bearer** rather than stacking with it |
+| `HOME` | `/tmp` | The schema cache and trace log still write to disk, and only `/tmp` is writable on a serverless host |
+
+The resource identifier the server verifies against is derived as
+`HUBSPOT_MCP_PUBLIC_URL` + `/mcp`, so it matches the Resource Indicator
+registered in §2 without a sixth variable to keep in sync.
 
 5. **Set a spend limit.** Billing → Spend Management: set an amount and enable
    *pause production deployment*. Two caveats worth knowing before you rely on
@@ -178,6 +184,24 @@ none should be shared. The server verifies tokens against the public JWKS at
    it below your true maximum.
 
 **Bring back:** the deployment URL, so §1's redirect URL can be finalised.
+
+---
+
+## 3b. Values settled for staging
+
+Recorded so they are not re-derived. All public identifiers; the two secrets
+(HubSpot client secret, state key) live only in the Vercel dashboard.
+
+| | |
+|---|---|
+| AuthKit issuer | `https://tolerant-climb-38-staging.authkit.app` — **no trailing slash**; RFC 9207 compares issuers exactly |
+| Resource Indicator | `https://hubspot-mcp-promptmetrics.vercel.app/mcp` |
+| `HUBSPOT_MCP_PUBLIC_URL` | `https://hubspot-mcp-promptmetrics.vercel.app` |
+| HubSpot redirect URL | `https://hubspot-mcp-promptmetrics.vercel.app/connect/hubspot/callback` |
+
+Confirmed live on the issuer's metadata: `client_id_metadata_document_supported`
+is true and a registration endpoint is present, so a Claude client can register
+itself by either mechanism with nothing for a user to paste.
 
 ---
 
@@ -192,8 +216,9 @@ curl https://<domain>/healthz
 curl -i https://<domain>/mcp
 # → 401, WWW-Authenticate carrying resource_metadata=...
 
-curl https://<domain>/.well-known/oauth-protected-resource
-# → names the AuthKit issuer, so a client can discover it with no configuration
+curl https://<domain>/.well-known/oauth-protected-resource/mcp
+# → names the AuthKit issuer, so a client can discover it with no configuration.
+#   Note the /mcp suffix: RFC 9728 mounts the document under the resource path.
 
 curl -i "https://<domain>/connect/hubspot?ticket=nope"
 # → 400 with a page saying the link expired — never a traceback
