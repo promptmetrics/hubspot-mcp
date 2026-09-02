@@ -28,3 +28,7 @@ oauth_states/
 
 # Reference copy of the source plugin (read-only build reference, not part of this server)
 reference/
+# Vercel CLI link artifacts. `.env*` matters: `vercel link` writes a
+# `.env.local` containing pulled environment values.
+.vercel
+.env*

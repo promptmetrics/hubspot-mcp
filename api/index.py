@@ -1,5 +1,12 @@
 """Vercel entrypoint — the hosted MCP server as an ASGI app.
 
+Lives in ``api/`` because that is the only layout Vercel's Python runtime picks
+up without a detected backend framework. With Framework Preset "Other" the
+project is treated as Node — install command ``npm install``, build command
+``npm run build`` — so a root-level entrypoint plus ``[tool.vercel] entrypoint``
+is never consulted, ``pip`` never runs, and the build "succeeds" in ~100ms
+having produced nothing. A ``functions`` key must target this directory too.
+
 Vercel imports this module and serves ``app``; it never calls
 ``hubspot_mcp.server.run``. That is why the bearer wrapper, the tenancy guard
 and the OAuth resource-server wiring all live in ``build_http_app`` rather than

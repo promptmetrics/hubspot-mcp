@@ -43,11 +43,6 @@ dev = [
     "mypy>=2.3.1,<2.4",
 ]
 
-# Explicit rather than relying on filename detection, so the entrypoint cannot
-# be changed by moving a file.
-[tool.vercel]
-entrypoint = "app:app"
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
