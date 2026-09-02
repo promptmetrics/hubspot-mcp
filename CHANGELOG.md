@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Phase 3 — stage 1: verifying MCP access tokens
+
+- **`JWTVerifier`** makes the hosted server an OAuth 2.1 resource server. It
+  verifies signature against the issuer's JWKS, the issuer as an exact string
+  (RFC 9207 comparison is exact, so a trailing slash is a different issuer), and
+  **the audience** — the check whose absence is invisible in testing and fatal
+  in production, because without it a token the same authorization server minted
+  for a *different* MCP server is accepted here.
+- **Asymmetric algorithms only.** Accepting an HMAC algorithm is the classic JWT
+  confusion attack: the issuer's public key is published, so an attacker could
+  sign their own token with it and have it verify. `none` likewise.
+- The JWKS is fetched with `httpx`, not `jwt.PyJWKClient`, which uses a blocking
+  `urllib` call — wrong on an event loop, and it bypasses the HTTP layer the
+  rest of the codebase tests against. An unknown `kid` refetches once, so issuer
+  key rotation is a non-event rather than an outage.
+- Every failure returns `None` rather than raising: the SDK turns that into the
+  401 the spec requires, and a JWKS outage becomes a 401 rather than a 500.
+- The `redis` extra is now `hosted`, and includes `pyjwt[crypto]`.
+
 ### Phase 3 — stage 1: app credentials from the environment
 
 - **`HUBSPOT_CLIENT_ID`, `HUBSPOT_CLIENT_SECRET` and `HUBSPOT_REGION` are now

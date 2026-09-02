@@ -22,12 +22,14 @@ hubspot-mcp = "hubspot_mcp.__main__:main"
 [project.optional-dependencies]
 # Only the hosted deployment needs these; the stdio plugin path must stay a
 # three-dependency install.
-redis = [
+hosted = [
     "redis>=6,<9",
     "cryptography>=42,<50",
+    # RS256/ES256 verification of the authorization server's tokens.
+    "pyjwt[crypto]>=2.10,<3",
 ]
 dev = [
-    "hubspot-mcp[redis]",
+    "hubspot-mcp[hosted]",
     "fakeredis>=2.30,<3",
     "pytest>=9.0,<10",
     "pytest-asyncio>=1.0,<2",
