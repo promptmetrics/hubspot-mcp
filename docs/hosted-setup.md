@@ -70,13 +70,23 @@ authorise their own portal.
    settings.users.write
    tickets
    ```
-   Two constraints that are easy to get wrong and produce confusing failures:
-   - **No `.delete` scopes.** Deletes go through the write gate and are
-     performed with write scopes; requesting delete scopes at authorize time
-     asks users for permission we do not need.
-   - **No `crm.objects.notes.*`, `.calls.*`, `.tasks.*` or `.emails.*`.**
-     HubSpot rejects the *entire* authorize call if these are requested, with an
-     error that does not name them.
+   Two absences, for entirely different reasons — worth not confusing them:
+   - **`.delete` scopes are our choice, not a HubSpot restriction.** They exist
+     and are perfectly requestable; we do not ask for them so that an approved
+     write can never quietly become a delete (R4, least privilege). Tick them if
+     you want to; the server still never requests them.
+   - **`crm.objects.notes.*`, `.calls.*`, `.tasks.*` and `.emails.*` are not
+     offered by HubSpot.** They are absent from the public-app scope reference
+     and the scope picker does not list them — HubSpot names engagement
+     permissions differently, and the `crm.objects.*` form appears only in its
+     own 403 error bodies. If you cannot find them in the picker, nothing is
+     missing: the server never requests them either.
+
+     `scope_registry` records the `crm.objects.*` form because that is what
+     HubSpot's errors name, and excludes it from what we request. Upstream also
+     found that requesting one made HubSpot reject the whole authorize call;
+     that behaviour is undocumented, so treat it as one team's experience rather
+     than a specified guarantee.
 
    Regenerate the list any time with `hubspot-mcp auth scopes`.
 4. Copy the **Client ID** and **Client Secret** from the Auth tab.

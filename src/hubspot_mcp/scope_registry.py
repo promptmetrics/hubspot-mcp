@@ -397,10 +397,17 @@ WRITE_TOOLS: set[str] = {
 RAW_API_WRITE_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
-# Scopes HubSpot documents in 403 bodies but does not offer in the app's scope
-# picker. Requesting one makes HubSpot reject the WHOLE authorize call, so they
-# are named here as the honest requirement while being excluded from what we
-# ask for. Engagement writes therefore rely on the portal already granting them.
+# Engagement scopes in the form HubSpot's own 403 bodies name, which is NOT a
+# form it grants: these are absent from the public-app scope reference and the
+# app scope picker does not offer them (HubSpot names engagement permissions
+# differently). They are recorded here as the honest requirement -- so a scope
+# error can be explained -- while being excluded from what we request.
+# Engagement writes therefore rely on the portal having granted them out of band.
+#
+# Upstream additionally found that requesting one made HubSpot reject the whole
+# authorize call. That is undocumented behaviour, so it is one team's experience
+# rather than a specified guarantee; the exclusion stands either way, because a
+# scope that cannot be granted is not worth asking for.
 _HIDDEN_SCOPE_OBJECTS = ("notes", "calls", "tasks", "emails")
 
 
