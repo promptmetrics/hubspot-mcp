@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Phase 3 — stage 1: per-caller session resolution
+
+The hosted path now resolves the HubSpot session **per request** from the
+verified access token, so all 86 tools act on the portal the *caller*
+authorised. The stdio path is untouched.
+
+- **Clients are pooled per subject, not built per request.** `HubSpotClient`
+  opens an `httpx.AsyncClient` in its constructor and must be closed; one per
+  request leaks a connection pool every time — invisible in testing, a slow
+  degradation in production. The pool is LRU-bounded at 32, evicts by closing,
+  and the lifespan closes the rest at shutdown.
+- **Pooled by subject rather than portal**, because two people may authorise the
+  same portal and a shared client would refresh one person's grant into the
+  other's record.
+- **A missing connection is guidance, not an error.** Someone authenticated but
+  not yet connected gets a connect link through the same `auth_error` channel
+  stdio uses for an unauthenticated portal — no new branch in any tool body. A
+  *transient* HubSpot failure deliberately gets no link: re-authorising fixes
+  nothing when HubSpot is merely having a bad minute.
+- **The hosted lifespan builds nothing portal-specific.** Its only job is owning
+  the pool's lifetime; if anything bypasses the resolver it gets a session that
+  cannot act, rather than a working client for whatever portal was configured.
+- Per-request resolution deliberately does **not** call `warm_standard_schemas`,
+  which makes several HubSpot calls. The schema cache warms on demand.
+
 ### Phase 3 — stage 1: pluggable token refresh
 
 - **`HubSpotClient` takes an optional `token_refresher`.** Its refresh
