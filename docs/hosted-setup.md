@@ -28,35 +28,39 @@ them belongs in the Vercel dashboard.
 A *public* app (not a private app) is what lets someone click "Connect" and
 authorise their own portal.
 
-1. In the [HubSpot developer portal](https://developers.hubspot.com), create an
-   app with the **marketplace** distribution type.
-   - Not *private* distribution: as a standard app partner that caps at **10**
-     customer installs, where marketplace-distribution allows **25** before a
-     listing is approved.
-2. **Auth tab → redirect URL.** This must match the deployment exactly,
-   including scheme and no trailing slash:
-   ```
-   https://<your-vercel-domain>/connect/hubspot/callback
-   ```
-   You will not know the domain until section 3. Either set a custom domain
-   first, or come back and fill this in — HubSpot rejects a mismatch outright.
-3. **Scopes.** Do not tick these by hand — the app is defined as code in
-   `hubspot-app/` and uploaded with `hs project upload`, generated from
-   `scope_registry.authorize_scopes()` so the app and the server can never
-   disagree. Two absences, for entirely different reasons:
-   - **`.delete` scopes are our choice, not a HubSpot restriction.** They exist
-     and are requestable; we do not ask for them so an approved write can never
-     quietly become a delete (R4, least privilege).
-   - **Four scope names HubSpot does not recognise at all.**
-     `crm.objects.tickets.*` and `crm.schemas.tickets.*` do not exist — tickets
-     sit outside the CRM object scope family, under one umbrella `tickets`
-     scope. Requesting them fails the app deploy with "The scope
-     crm.objects.tickets.write could not be recognized". Likewise
-     `crm.objects.{notes,calls,tasks,emails}.*`, which HubSpot's own 403 bodies
-     name but its scope picker never offers.
+The app is **defined as code** in `hubspot-app/` and uploaded with the HubSpot
+CLI, not clicked together in the dashboard. That is what keeps the scopes it
+requires identical to the scopes the server requests — `tests/test_hubspot_app_definition.py`
+fails the build if they diverge.
 
-   Regenerate the list any time with `hubspot-mcp auth scopes`.
-4. Copy the **Client ID** and **Client Secret** from the Auth tab.
+1. Install and authenticate the CLI. Run `auth` from your **home directory**:
+   it writes a personal access key into `hubspot.config.yml` in whatever
+   directory you are standing in.
+   ```sh
+   npm install -g @hubspot/cli@latest
+   cd ~ && hs account auth
+   ```
+2. Upload the app:
+   ```sh
+   cd <repo>/hubspot-app && hs project upload
+   ```
+   The config already carries the redirect URL, marketplace distribution, OAuth,
+   and the exact scope set. Nothing to fill in.
+3. `hs project open` opens the app in HubSpot; copy the **Client ID** and
+   **Client Secret** from its Auth tab.
+
+**Two scope traps, both learned by failing:**
+
+- **Four scope names HubSpot does not recognise.** `crm.objects.tickets.*` and
+  `crm.schemas.tickets.*` do not exist — tickets sit outside the CRM object
+  scope family, under a single umbrella `tickets` scope. Requesting them fails
+  the deploy with *"The scope crm.objects.tickets.write could not be
+  recognized"*, naming only the first one it hits.
+- **`oauth` is itself a required scope**, and easy to miss because nothing in
+  the tool registry implies it. Without it the app will not install.
+
+Both are handled by generating `requiredScopes` from
+`scope_registry.authorize_scopes()`; do not hand-edit them.
 
 **Bring back:** `HUBSPOT_CLIENT_ID`, `HUBSPOT_CLIENT_SECRET`.
 
@@ -129,8 +133,8 @@ none should be shared. The server verifies tokens against the public JWKS at
 
 1. Create a project from this repository. Framework preset: **Other**. The
    entrypoint, function config and dependency install are already committed —
-   `app.py`, `vercel.json` and `requirements.txt` — so there is nothing to
-   configure in the build settings.
+   `api/index.py`, `vercel.json` and `requirements.txt` — so there is nothing
+   to configure in the build settings.
 2. Add a **Redis** store from the Marketplace (Upstash or Redis Cloud — either
    works; the code speaks the Redis protocol and reads a single `REDIS_URL`).
    The integration injects `REDIS_URL` automatically.
@@ -167,7 +171,7 @@ the portal comes from each caller's token, so a process-wide portal is not a
 fallback — it is another customer's CRM sitting behind any path that fails to
 resolve the caller. The server refuses to start if either is present.
 
-`HOME` needs no configuration: `app.py` redirects it to `/tmp` when running on
+`HOME` needs no configuration: `api/index.py` redirects it to `/tmp` when running on
 Vercel, before importing anything that reads it. It cannot be set in
 `vercel.json` — Vercel treats `HOME` as reserved and **refuses the entire
 deployment**, with a production domain that then serves 404s and looks for all
@@ -195,13 +199,42 @@ Recorded so they are not re-derived. All public identifiers; the two secrets
 | | |
 |---|---|
 | AuthKit issuer | `https://tolerant-climb-38-staging.authkit.app` — **no trailing slash**; RFC 9207 compares issuers exactly |
-| Resource Indicator | `https://hubspot-mcp-promptmetrics.vercel.app/mcp` |
-| `HUBSPOT_MCP_PUBLIC_URL` | `https://hubspot-mcp-promptmetrics.vercel.app` |
-| HubSpot redirect URL | `https://hubspot-mcp-promptmetrics.vercel.app/connect/hubspot/callback` |
+| Resource Indicator | `https://hubspot-mcp.promptmetrics.dev/mcp` |
+| `HUBSPOT_MCP_PUBLIC_URL` | `https://hubspot-mcp.promptmetrics.dev` |
+| HubSpot redirect URL | `https://hubspot-mcp.promptmetrics.dev/connect/hubspot/callback` |
 
 Confirmed live on the issuer's metadata: `client_id_metadata_document_supported`
 is true and a registration endpoint is present, so a Claude client can register
 itself by either mechanism with nothing for a user to paste.
+
+---
+
+## 3c. Vercel gotchas that each cost a deployment
+
+All three produce symptoms that point somewhere other than the cause, so they
+are recorded rather than left to be rediscovered.
+
+| Symptom | Cause |
+|---|---|
+| Deployment refused before any build, `The env key "HOME" is a reserved system keyword` | `HOME` cannot be set in `vercel.json`. `api/index.py` sets it in-process when `VERCEL` is set, before importing anything that reads it |
+| `The pattern "app.py" defined in 'functions' doesn't match any Serverless Functions inside the 'api' directory` | `functions` keys must target `api/`. The entrypoint lives there for exactly this reason |
+| Build **succeeds** in ~100ms, production domain 404s everything | Framework Preset is "Other", so Vercel treats the repo as Node — `npm install`, `npm run build` — and never runs `pip`. Only the `api/` directory is picked up without a detected backend framework |
+
+The third is the nastiest: an empty output deploys cleanly and looks exactly
+like a routing problem. **Read the build log before diagnosing a 404** — a real
+build installs dependencies and takes ~20s, a no-op takes ~100ms and says
+"Skipping cache upload because no files were prepared".
+
+```sh
+vercel ls hs-mcp --scope <team>
+vercel inspect <deployment-url> --logs --scope <team>
+```
+
+Changing an environment variable needs a **redeploy**, not a new commit:
+
+```sh
+vercel redeploy <production-url> --scope <team>
+```
 
 ---
 
