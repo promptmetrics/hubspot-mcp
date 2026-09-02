@@ -118,8 +118,12 @@ provider swappable.
    default (the `...` menu) so clients that omit the `resource` parameter still
    get a bound token. You can register several — staging and production can
    coexist.
-5. Copy the **AuthKit domain** — the issuer, of the form
-   `https://<something>.authkit.app`.
+5. Copy the **AuthKit domain** — the issuer. It is under **Domains**, *not* the
+   AuthKit section, with the environment selected. Staging assigns a random
+   phrase, e.g. `youthful-ginger-43.authkit.app`, so it cannot be guessed — read
+   it off that page. Confirm a candidate by opening
+   `https://<domain>/.well-known/oauth-authorization-server`; JSON means right.
+   The issuer is the full `https://<domain>`, no path, no trailing slash.
 
 **Bring back:** the AuthKit issuer URL and the Resource Indicator you set. Both
 are public identifiers — **no WorkOS API key or client secret is needed**, and
