@@ -93,6 +93,12 @@ def test_the_declared_entrypoint_matches_the_file(vercel_config):
     assert attribute == "app"
 
 
+def test_functions_run_in_the_same_region_as_redis(vercel_config):
+    """Vercel defaults to Washington DC. An approve makes ~6 Redis round trips,
+    so functions an ocean away from the store cost half a second per write."""
+    assert vercel_config["regions"] == ["fra1"]
+
+
 def test_home_is_redirected_to_a_writable_path(vercel_config):
     """The schema cache and trace log still write to disk; only /tmp is writable."""
     assert vercel_config["env"]["HOME"] == "/tmp"
