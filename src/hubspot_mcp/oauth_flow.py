@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 
 from hubspot_mcp.app_credentials import (
+    get_api_base_url,
     get_client_id,
     get_client_secret,
     get_oauth_endpoints,
@@ -184,6 +185,62 @@ async def exchange_code_for_token(
         scopes_granted=body.get("scope", "").split() or None,
     )
     return body
+
+
+async def exchange_code_only(
+    code: str, redirect_uri: str, code_verifier: str
+) -> dict[str, Any]:
+    """Exchange an authorization code, persisting nothing.
+
+    The network half of :func:`exchange_code_for_token`, split out for the same
+    reason as :func:`refresh_tokens_only`: the hosted path stores tokens per
+    user in the connection store rather than in a local portal file, and both
+    paths must share one endpoint, one payload and one 404-fallback rule.
+    """
+    client_id = get_client_id()
+    client_secret = get_client_secret()
+    if not client_id or not client_secret:
+        raise ValueError("HubSpot app credentials not found.")
+
+    return await _post_token_request(
+        {
+            "grant_type": "authorization_code",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+            "code": code,
+            "code_verifier": code_verifier,
+        }
+    )
+
+
+async def resolve_hub_id(token_body: dict[str, Any]) -> str:
+    """Return the portal (hub) id the grant belongs to.
+
+    A public app cannot know the portal in advance — the user chooses the
+    account on HubSpot's own consent screen — so it has to come back with the
+    grant. HubSpot returns ``hub_id`` in the token response; the token-info
+    endpoint is the documented fallback for the case where it does not.
+    """
+    hub_id = token_body.get("hub_id")
+    if hub_id:
+        return str(hub_id)
+
+    access_token = token_body.get("access_token")
+    if not access_token:
+        raise ValueError("Token response carried neither hub_id nor an access token.")
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{get_api_base_url()}/oauth/v1/access-tokens/{access_token}"
+        )
+        resp.raise_for_status()
+        info = resp.json()
+
+    hub_id = info.get("hub_id")
+    if not hub_id:
+        raise ValueError("HubSpot did not report which portal this grant belongs to.")
+    return str(hub_id)
 
 
 async def refresh_tokens_only(refresh_token: str) -> dict[str, Any]:

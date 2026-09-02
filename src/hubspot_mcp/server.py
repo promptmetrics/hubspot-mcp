@@ -33,6 +33,7 @@ injected. ``tests/test_smoke.py`` pins this.
 """
 import inspect
 import os
+import sys
 import typing
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -749,6 +750,79 @@ def _register_all_tools() -> None:
 
 _register_all_tools()
 _register_agent_prompts()
+
+
+@mcp.custom_route("/connect/hubspot", methods=["GET"])
+async def connect_hubspot(request: Any) -> Any:
+    """Redeem a connect ticket and send the browser to HubSpot's consent screen.
+
+    Public by necessity — a browser carries no MCP token. The ticket in the query
+    string is the credential, which is why it is single-use and short-lived.
+    """
+    from starlette.responses import RedirectResponse
+
+    from hubspot_mcp.auth.connect import ConnectError, ConnectFlow
+
+    try:
+        authorize_url = await ConnectFlow.from_env().begin(request.query_params.get("ticket", ""))
+    except ConnectError as exc:
+        return _connect_page("Could not start the connection", str(exc), ok=False)
+    return RedirectResponse(authorize_url, status_code=302)
+
+
+@mcp.custom_route("/connect/hubspot/callback", methods=["GET"])
+async def connect_hubspot_callback(request: Any) -> Any:
+    """Exchange HubSpot's authorization code and store the user's connection."""
+    from hubspot_mcp.auth.connect import ConnectError, ConnectFlow
+
+    params = request.query_params
+    if params.get("error"):
+        # HubSpot's own refusal (user declined, app misconfigured). Its text is
+        # attacker-influencable, so it is escaped like everything else.
+        return _connect_page(
+            "HubSpot did not complete the connection",
+            params.get("error_description") or params.get("error"),
+            ok=False,
+        )
+    try:
+        connection = await ConnectFlow.from_env().complete(
+            params.get("code", ""), params.get("state", "")
+        )
+    except ConnectError as exc:
+        return _connect_page("Could not complete the connection", str(exc), ok=False)
+    except Exception as exc:  # noqa: BLE001 — a stack trace in a browser helps nobody
+        print(f"hubspot_mcp: connect callback failed: {exc}", file=sys.stderr)
+        return _connect_page(
+            "Could not complete the connection",
+            "Something went wrong exchanging the authorisation with HubSpot. Try again.",
+            ok=False,
+        )
+    return _connect_page(
+        "HubSpot connected",
+        f"Portal {connection.portal_id} is now connected. You can close this tab "
+        "and return to your assistant.",
+        ok=True,
+    )
+
+
+def _connect_page(heading: str, detail: str, *, ok: bool) -> Any:
+    """Render the browser-facing result of a connect attempt.
+
+    Everything interpolated is escaped: `detail` can carry HubSpot's error text,
+    which is outside our control.
+    """
+    import html
+
+    from starlette.responses import HTMLResponse
+
+    return HTMLResponse(
+        "<!doctype html><meta charset=utf-8>"
+        "<title>HubSpot connection</title>"
+        "<body style=\"font:16px system-ui;max-width:34rem;margin:4rem auto;padding:0 1rem\">"
+        f"<h1 style=\"font-size:1.25rem\">{html.escape(heading)}</h1>"
+        f"<p>{html.escape(detail)}</p></body>",
+        status_code=200 if ok else 400,
+    )
 
 
 @mcp.custom_route("/healthz", methods=["GET"])
