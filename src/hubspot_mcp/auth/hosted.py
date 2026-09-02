@@ -84,10 +84,10 @@ class HostedOAuthProvider:
                 raise NotConnectedError("No HubSpot account is connected for this user.")
             if not current.is_expired(leeway_seconds=REFRESH_LEEWAY_SECONDS):
                 return current.to_portal_config()
-            refreshed = await self._refresh(current)
+            refreshed = await self.refresh(current)
         return refreshed.to_portal_config()
 
-    async def _refresh(self, connection: HubSpotConnection) -> HubSpotConnection:
+    async def refresh(self, connection: HubSpotConnection) -> HubSpotConnection:
         from hubspot_mcp.oauth_flow import refresh_tokens_only
 
         try:

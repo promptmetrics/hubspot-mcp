@@ -90,12 +90,44 @@ def _resolve_portal_id() -> str | None:
     return _resolve_portal_source()[0]
 
 
+def _unresolved_lifespan() -> dict[str, Any]:
+    """The hosted lifespan context: a session nobody should read.
+
+    Every request goes through the resolver, so this is only reached if
+    something bypasses it — in which case it must not hand back a working
+    client for whatever portal happened to be configured.
+    """
+    return {
+        "client": None,
+        "cache": None,
+        "portal_config": None,
+        "portal_id": None,
+        "auth_error": "No HubSpot session resolved for this request.",
+        "capabilities": None,
+    }
+
+
 def _make_provider(mode: str) -> TokenProvider:
     return OAuthProvider() if mode == "oauth" else EnvTokenProvider()
 
 
 @asynccontextmanager
 async def app_lifespan(server: MCPServer):
+    if _TOKEN_VERIFIER is not None:
+        # Hosted: nothing portal-specific exists at startup, because the portal
+        # is a property of whoever is calling. Everything is resolved per
+        # request; the lifespan's only job is owning the client pool's lifetime.
+        from hubspot_mcp.hosted_session import build_session_resolver
+
+        resolver = build_session_resolver()
+        set_session_resolver(resolver)
+        try:
+            yield _unresolved_lifespan()
+        finally:
+            set_session_resolver(None)
+            await resolver.pool.close_all()
+        return
+
     portal_id = _resolve_portal_id()
     provider = _make_provider(_SERVER_CONFIG["mode"])
 
