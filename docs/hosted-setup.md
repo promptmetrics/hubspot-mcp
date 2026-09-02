@@ -40,53 +40,20 @@ authorise their own portal.
    ```
    You will not know the domain until section 3. Either set a custom domain
    first, or come back and fill this in — HubSpot rejects a mismatch outright.
-3. **Auth tab → scopes.** Exactly these 27, and no others:
-   ```
-   automation
-   crm.lists.read
-   crm.lists.write
-   crm.objects.appointments.read
-   crm.objects.appointments.write
-   crm.objects.companies.read
-   crm.objects.companies.write
-   crm.objects.contacts.read
-   crm.objects.contacts.write
-   crm.objects.deals.read
-   crm.objects.deals.write
-   crm.objects.tickets.read
-   crm.objects.tickets.write
-   crm.pipelines.orders.read
-   crm.pipelines.orders.write
-   crm.schemas.companies.read
-   crm.schemas.companies.write
-   crm.schemas.contacts.read
-   crm.schemas.contacts.write
-   crm.schemas.deals.read
-   crm.schemas.deals.write
-   crm.schemas.tickets.read
-   crm.schemas.tickets.write
-   sales-email-read
-   settings.users.read
-   settings.users.write
-   tickets
-   ```
-   Two absences, for entirely different reasons — worth not confusing them:
+3. **Scopes.** Do not tick these by hand — the app is defined as code in
+   `hubspot-app/` and uploaded with `hs project upload`, generated from
+   `scope_registry.authorize_scopes()` so the app and the server can never
+   disagree. Two absences, for entirely different reasons:
    - **`.delete` scopes are our choice, not a HubSpot restriction.** They exist
-     and are perfectly requestable; we do not ask for them so that an approved
-     write can never quietly become a delete (R4, least privilege). Tick them if
-     you want to; the server still never requests them.
-   - **`crm.objects.notes.*`, `.calls.*`, `.tasks.*` and `.emails.*` are not
-     offered by HubSpot.** They are absent from the public-app scope reference
-     and the scope picker does not list them — HubSpot names engagement
-     permissions differently, and the `crm.objects.*` form appears only in its
-     own 403 error bodies. If you cannot find them in the picker, nothing is
-     missing: the server never requests them either.
-
-     `scope_registry` records the `crm.objects.*` form because that is what
-     HubSpot's errors name, and excludes it from what we request. Upstream also
-     found that requesting one made HubSpot reject the whole authorize call;
-     that behaviour is undocumented, so treat it as one team's experience rather
-     than a specified guarantee.
+     and are requestable; we do not ask for them so an approved write can never
+     quietly become a delete (R4, least privilege).
+   - **Four scope names HubSpot does not recognise at all.**
+     `crm.objects.tickets.*` and `crm.schemas.tickets.*` do not exist — tickets
+     sit outside the CRM object scope family, under one umbrella `tickets`
+     scope. Requesting them fails the app deploy with "The scope
+     crm.objects.tickets.write could not be recognized". Likewise
+     `crm.objects.{notes,calls,tasks,emails}.*`, which HubSpot's own 403 bodies
+     name but its scope picker never offers.
 
    Regenerate the list any time with `hubspot-mcp auth scopes`.
 4. Copy the **Client ID** and **Client Secret** from the Auth tab.

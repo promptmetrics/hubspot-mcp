@@ -41,13 +41,29 @@ def test_no_delete_scopes_are_requested(app_config):
     assert [s for s in app_config["auth"]["requiredScopes"] if s.endswith(".delete")] == []
 
 
-def test_no_scopes_hubspot_will_not_grant(app_config):
-    """`crm.objects.notes.*` and friends are absent from HubSpot's public-app
-    scope reference and its scope picker."""
-    ungrantable = ("crm.objects.notes.", "crm.objects.calls.", "crm.objects.tasks.", "crm.objects.emails.")
-    assert not [
-        s for s in app_config["auth"]["requiredScopes"] if s.startswith(ungrantable)
-    ]
+@pytest.mark.parametrize(
+    "prefix,why",
+    [
+        ("crm.objects.notes.", "engagement scopes HubSpot does not offer"),
+        ("crm.objects.calls.", "engagement scopes HubSpot does not offer"),
+        ("crm.objects.tasks.", "engagement scopes HubSpot does not offer"),
+        ("crm.objects.emails.", "engagement scopes HubSpot does not offer"),
+        ("crm.objects.tickets.", "tickets use the umbrella `tickets` scope"),
+        ("crm.schemas.tickets.", "tickets use the umbrella `tickets` scope"),
+    ],
+)
+def test_no_scopes_hubspot_will_not_grant(app_config, prefix, why):
+    """An unrecognised scope fails the app deploy outright:
+
+        ERROR The scope crm.objects.tickets.write could not be recognized.
+    """
+    offending = [s for s in app_config["auth"]["requiredScopes"] if s.startswith(prefix)]
+    assert offending == [], f"{offending}: {why}"
+
+
+def test_tickets_are_covered_by_the_umbrella_scope(app_config):
+    """Dropping the invalid names must not drop ticket access altogether."""
+    assert "tickets" in app_config["auth"]["requiredScopes"]
 
 
 # --------------------------------------------------------------------------- #

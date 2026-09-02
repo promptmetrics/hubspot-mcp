@@ -10,6 +10,13 @@
   are one set, checked by a test: an app requiring a scope the authorize call
   omits **fails to install**, and an app missing a scope a tool needs fails at
   the first call with a 403 — both a long way from the mistake.
+- **Four scopes we were requesting do not exist.** `crm.objects.tickets.*`
+  and `crm.schemas.tickets.*` are not HubSpot scopes — tickets sit outside
+  the CRM object scope family under one umbrella `tickets` scope, which we
+  already request. They stay in the registry, because a `.write` suffix is
+  what classifies a ticket write as a write, and are dropped only from what
+  we ask HubSpot to grant. Found by the app deploy: "The scope
+  crm.objects.tickets.write could not be recognized."
 - **`authorize_scopes()` now includes `oauth`.** HubSpot's own scope for OAuth
   access, which `hs project create --auth oauth` scaffolds into `requiredScopes`
   and which we were not requesting. 27 scopes became 28.

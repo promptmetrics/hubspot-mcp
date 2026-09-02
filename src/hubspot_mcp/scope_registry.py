@@ -415,6 +415,18 @@ _HIDDEN_SCOPE_OBJECTS = ("notes", "calls", "tasks", "emails")
 # `hs project create --auth oauth` scaffolds it into `requiredScopes` -- and an
 # install fails if the app requires a scope the authorize call does not request,
 # so it belongs in both. It grants nothing on its own.
+# Tickets do not use the standard CRM object scope structure. There is no
+# `crm.objects.tickets.*` or `crm.schemas.tickets.*` -- HubSpot covers tickets
+# with one umbrella scope, `tickets`, which the registry already emits
+# alongside. Requesting the non-existent names fails the app deploy outright:
+#
+#   ERROR The scope crm.objects.tickets.write could not be recognized.
+#
+# They stay in the registry because that is what the tool layer reasons about
+# (a `.write` suffix is what classifies a ticket write as a write), and are
+# dropped only from what we ask HubSpot to grant.
+_UNGRANTABLE_SCOPE_PREFIXES = ("crm.objects.tickets.", "crm.schemas.tickets.")
+
 _OAUTH_SCOPE = "oauth"
 
 
@@ -422,13 +434,15 @@ def authorize_scopes() -> list[str]:
     """The exact scope set to request at authorize time.
 
     Derived from the tool registry rather than hardcoded, so a new tool cannot
-    silently under-provision the OAuth grant. Plus ``oauth`` itself. Two
-    exclusions, both deliberate:
+    silently under-provision the OAuth grant. Plus ``oauth`` itself. Three
+    exclusions, all deliberate:
 
     * ``.delete`` scopes are never requested (R4, least privilege). Deleting is
       still possible for a portal that granted them out of band; we just do not
       ask for destructive access by default.
     * Hidden engagement scopes are omitted -- see ``_HIDDEN_SCOPE_OBJECTS``.
+    * Ticket object/schema scopes are omitted -- see
+      ``_UNGRANTABLE_SCOPE_PREFIXES``. The umbrella ``tickets`` scope covers them.
     """
     from hubspot_mcp.tools import list_tools
 
@@ -442,5 +456,11 @@ def authorize_scopes() -> list[str]:
     def _hidden(scope: str) -> bool:
         return any(scope.startswith(f"crm.objects.{o}.") for o in _HIDDEN_SCOPE_OBJECTS)
 
-    granted = {s for s in found if not s.endswith(".delete") and not _hidden(s)}
+    granted = {
+        s
+        for s in found
+        if not s.endswith(".delete")
+        and not _hidden(s)
+        and not s.startswith(_UNGRANTABLE_SCOPE_PREFIXES)
+    }
     return sorted(granted | {_OAUTH_SCOPE})

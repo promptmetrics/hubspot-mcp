@@ -271,7 +271,10 @@ class TestAuthorizeScopes:
 
         scopes = set(authorize_scopes())
         for needed in (
-            "crm.objects.tickets.read",
+            # `tickets`, not `crm.objects.tickets.read`: HubSpot has no ticket
+            # scope in the CRM object family, and requesting one fails the app
+            # deploy with "could not be recognized".
+            "tickets",
             "crm.lists.write",
             "automation",
             "settings.users.read",
@@ -291,6 +294,7 @@ class TestAuthorizeScopes:
                 s
                 for s in required
                 if not s.endswith(".delete")
+                and not s.startswith(("crm.objects.tickets.", "crm.schemas.tickets."))
                 and not any(
                     s.startswith(f"crm.objects.{o}.") for o in ("notes", "calls", "tasks", "emails")
                 )
