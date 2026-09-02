@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Phase 3 — stage 1: app credentials from the environment
+
+- **`HUBSPOT_CLIENT_ID`, `HUBSPOT_CLIENT_SECRET` and `HUBSPOT_REGION` are now
+  read from the environment**, falling back to
+  `~/.claude/hubspot/app_credentials.json`. A hosted deployment has no writable
+  home directory, so the file was the only source and there was no way to
+  configure one at all. Environment wins: a deployment sets these deliberately,
+  where the file is written by the plugin's SessionStart hook and may belong to
+  a different app. A blank variable counts as unset, and values are trimmed
+  because both `vercel env pull` and dashboard paste add newlines.
+- **`docs/hosted-setup.md`** — what to create in HubSpot, WorkOS and Vercel, and
+  which values to bring back.
 ### Phase 3 — stage 1: connecting a HubSpot account
 
 - **`ConnectFlow`** bridges the awkward gap in hosted OAuth: authorising HubSpot
@@ -82,8 +94,6 @@ Groundwork for per-user OAuth. No behaviour change on any existing path.
   keeps exactly its single-portal behaviour, and `_lifespan` remains the
   single-portal implementation rather than something tools call directly. A test
   fails the build if anything reaches past the seam to it.
-
-## Unreleased
 
 ### Phase 2 — Task 1: the `StateStore` seam
 
