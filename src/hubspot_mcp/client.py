@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -81,6 +82,18 @@ def get_last_rate_state(portal_id: str) -> tuple[int | None, float | None]:
     return _LAST_RATE_STATE.get(portal_id, (None, None))
 
 
+# How a refreshed grant is persisted. Injected rather than imported so the
+# hosted path can store per-user tokens without the client knowing where.
+TokenRefresher = Callable[[PortalConfig], Awaitable[dict[str, Any]]]
+
+
+async def _refresh_via_portal_file(portal: PortalConfig) -> dict[str, Any]:
+    """Default refresher: exchange and write the local portal file (stdio)."""
+    from hubspot_mcp.oauth_flow import refresh_access_token
+
+    return await refresh_access_token(portal.portal_id, portal.refresh_token or "")
+
+
 class HubSpotClient:
     BASE_URL = "https://api.hubapi.com"
     _RATE_LIMIT = 100  # requests per 10 seconds
@@ -94,8 +107,13 @@ class HubSpotClient:
     # the loop's pause/approve surface can act on the real backoff.
     _MAX_RETRY_AFTER_SECONDS = 60
 
-    def __init__(self, portal: PortalConfig):
+    def __init__(self, portal: PortalConfig, *, token_refresher: TokenRefresher | None = None):
         self.portal = portal
+        # Where a refreshed token gets persisted. The default writes the local
+        # portal file, which is right for stdio and wrong for a hosted
+        # deployment — there, tokens belong to a *user* in the connection store,
+        # not to a portal on a disk that does not survive the instance.
+        self._token_refresher = token_refresher or _refresh_via_portal_file
         self._client = httpx.AsyncClient(
             base_url=get_api_base_url(),
             headers={"Authorization": f"Bearer {portal.token}"},
@@ -131,13 +149,22 @@ class HubSpotClient:
             # Re-check inside the lock in case another task already refreshed
             if not force and self.portal.expires_at and self.portal.expires_at - time.time() >= self._REFRESH_BUFFER_SECONDS:
                 return self.portal.token
-            from hubspot_mcp.oauth_flow import refresh_access_token
-            body = await refresh_access_token(self.portal.portal_id, self.portal.refresh_token)
+            body = await self._token_refresher(self.portal)
             self.portal.token = body["access_token"]
             self.portal.refresh_token = body.get("refresh_token", self.portal.refresh_token)
             self.portal.expires_at = time.time() + body.get("expires_in", 21600)
             self._client.headers["Authorization"] = f"Bearer {self.portal.token}"
         return self.portal.token
+
+    def update_credentials(self, portal: PortalConfig) -> None:
+        """Adopt a freshly resolved ``PortalConfig``.
+
+        Lets a pooled client be handed the caller's current token without
+        rebuilding it — and so without discarding its connection pool — when
+        something outside the client has already refreshed.
+        """
+        self.portal = portal
+        self._client.headers["Authorization"] = f"Bearer {portal.token}"
 
     async def _request(
         self,

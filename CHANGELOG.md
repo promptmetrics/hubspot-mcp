@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Phase 3 — stage 1: pluggable token refresh
+
+- **`HubSpotClient` takes an optional `token_refresher`.** Its refresh
+  previously wrote the local portal file, which is right for stdio and wrong for
+  a hosted deployment twice over: that disk does not survive the instance, and a
+  hosted token belongs to a *user* in the connection store rather than to a
+  portal. The default is unchanged, so stdio behaves exactly as before.
+- **`update_credentials()`** lets a pooled client adopt a freshly resolved
+  token without being rebuilt, so it keeps its connection pool. Prerequisite
+  for serving many portals from one process without a socket leak per request.
+
 ### Phase 3 — stage 1: the server as an OAuth resource server
 
 - **Setting `HUBSPOT_MCP_OAUTH_ISSUER` turns on per-request OAuth.** The server
