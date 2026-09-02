@@ -33,7 +33,10 @@ def _in_hosted_server(code: str, **env: str) -> str:
     `tenancy.enforce_no_ambient_portal`).
     """
     base = {"PATH": "/usr/bin:/bin", "HOME": "/tmp"}
-    if not env.get("HUBSPOT_MCP_OAUTH_ISSUER", "").strip():
+    if env.get("HUBSPOT_MCP_OAUTH_ISSUER", "").strip():
+        # Hosted also requires durable state; never connected to, only checked for.
+        base["REDIS_URL"] = "redis://localhost:6379/0"
+    else:
         base["HUBSPOT_PORTAL"] = "99999999"
     result = subprocess.run(
         [sys.executable, "-c", "import hubspot_mcp.server as s\n" + code],

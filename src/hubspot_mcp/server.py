@@ -925,7 +925,11 @@ def build_http_app(host: str = "127.0.0.1") -> Any:
     the uvicorn branch below, or the hosted deployment would serve unguarded.
     """
     from hubspot_mcp.auth.bearer_middleware import BearerAuthMiddleware, resolve_server_secret
-    from hubspot_mcp.tenancy import enforce_no_ambient_portal, enforce_single_tenant
+    from hubspot_mcp.tenancy import (
+        enforce_durable_state,
+        enforce_no_ambient_portal,
+        enforce_single_tenant,
+    )
 
     # Checks run before the app is built, so a misconfigured deployment fails at
     # startup rather than on its first request.
@@ -939,6 +943,7 @@ def build_http_app(host: str = "127.0.0.1") -> Any:
         # `hosted_session` resolves it per request — nothing may fall back to a
         # process-wide portal, which would be somebody else's CRM.
         enforce_no_ambient_portal()
+        enforce_durable_state()
 
     app = mcp.streamable_http_app(streamable_http_path=MCP_PATH, host=host)
 

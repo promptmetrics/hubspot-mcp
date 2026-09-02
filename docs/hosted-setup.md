@@ -199,7 +199,12 @@ none should be shared. The server verifies tokens against the public JWKS at
 the portal comes from each caller's token, so a process-wide portal is not a
 fallback — it is another customer's CRM sitting behind any path that fails to
 resolve the caller. The server refuses to start if either is present.
-| ~~`HOME`~~ | — | Already set to `/tmp` in `vercel.json`; nothing to do |
+
+`HOME` needs no configuration: `app.py` redirects it to `/tmp` when running on
+Vercel, before importing anything that reads it. It cannot be set in
+`vercel.json` — Vercel treats `HOME` as reserved and **refuses the entire
+deployment**, with a production domain that then serves 404s and looks for all
+the world like a routing problem.
 
 The resource identifier the server verifies against is derived as
 `HUBSPOT_MCP_PUBLIC_URL` + `/mcp`, so it matches the Resource Indicator
