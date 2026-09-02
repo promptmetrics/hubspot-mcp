@@ -108,12 +108,32 @@ provider swappable.
 3. **Enable Dynamic Client Registration**: *Connect* → *Configuration*. WorkOS
    supports Client ID Metadata Documents natively; DCR is the fallback for MCP
    clients that do not yet speak CIMD, and we do not know which Claude uses.
-4. **Add a Resource Indicator** for the deployment URL — `https://<domain>`,
-   no path, no trailing slash. AuthKit then issues tokens with an `aud` claim
-   matching it, which is what lets our server prove a token was minted *for us*.
-   The MCP spec requires that check; without it a token issued for some other
-   resource would be accepted here. Mark it the default so clients that omit
-   the `resource` parameter still get a bound token.
+4. **Add a Resource Indicator** under *Connect*. This is not a value WorkOS
+   gives you — it is your server's URL, which you decide and then register:
+   ```
+   https://<your-domain>/mcp
+   ```
+   **Include the `/mcp` path.** That is the exact URL that goes into the client,
+   so it is what the client names when requesting a token. WorkOS's own example
+   shows a bare domain because theirs sits at a subdomain root; ours does not.
+   The value has to match in three places — what AuthKit stamps as `aud`, what
+   our server verifies, and what the client sends as `resource` — so use the
+   form the client will actually send.
+
+   Then open the **`...` menu** next to it and **Set as default**, which covers
+   clients that omit the `resource` parameter.
+
+   AuthKit stamps issued tokens with an `aud` matching this, which is what lets
+   our server prove a token was minted *for us*. Without it a token the same
+   authorization server issued for a **different** MCP server verifies here
+   perfectly — same issuer, same signature — and an agent moves between many
+   servers in one session. **Configure none and AuthKit falls back to the
+   environment's client ID as the audience and ignores `resource` entirely**,
+   which silently removes that protection.
+
+   You can register several: staging and production, or a `.vercel.app` host now
+   and a custom domain later.
+
 5. Copy the **AuthKit domain** — the issuer, of the form
    `https://<something>.authkit.app`.
 
