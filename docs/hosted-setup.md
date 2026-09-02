@@ -70,13 +70,23 @@ authorise their own portal.
    settings.users.write
    tickets
    ```
-   Two constraints that are easy to get wrong and produce confusing failures:
-   - **No `.delete` scopes.** Deletes go through the write gate and are
-     performed with write scopes; requesting delete scopes at authorize time
-     asks users for permission we do not need.
-   - **No `crm.objects.notes.*`, `.calls.*`, `.tasks.*` or `.emails.*`.**
-     HubSpot rejects the *entire* authorize call if these are requested, with an
-     error that does not name them.
+   Two absences, for entirely different reasons — worth not confusing them:
+   - **`.delete` scopes are our choice, not a HubSpot restriction.** They exist
+     and are perfectly requestable; we do not ask for them so that an approved
+     write can never quietly become a delete (R4, least privilege). Tick them if
+     you want to; the server still never requests them.
+   - **`crm.objects.notes.*`, `.calls.*`, `.tasks.*` and `.emails.*` are not
+     offered by HubSpot.** They are absent from the public-app scope reference
+     and the scope picker does not list them — HubSpot names engagement
+     permissions differently, and the `crm.objects.*` form appears only in its
+     own 403 error bodies. If you cannot find them in the picker, nothing is
+     missing: the server never requests them either.
+
+     `scope_registry` records the `crm.objects.*` form because that is what
+     HubSpot's errors name, and excludes it from what we request. Upstream also
+     found that requesting one made HubSpot reject the whole authorize call;
+     that behaviour is undocumented, so treat it as one team's experience rather
+     than a specified guarantee.
 
    Regenerate the list any time with `hubspot-mcp auth scopes`.
 4. Copy the **Client ID** and **Client Secret** from the Auth tab.
@@ -150,8 +160,10 @@ none should be shared. The server verifies tokens against the public JWKS at
 
 ## 3. Vercel
 
-1. Create a project from this repository. Framework preset: **Other**; the ASGI
-   entrypoint is `hubspot_mcp.server.build_http_app()`.
+1. Create a project from this repository. Framework preset: **Other**. The
+   entrypoint, function config and dependency install are already committed —
+   `app.py`, `vercel.json` and `requirements.txt` — so there is nothing to
+   configure in the build settings.
 2. Add a **Redis** store from the Marketplace (Upstash or Redis Cloud — either
    works; the code speaks the Redis protocol and reads a single `REDIS_URL`).
    The integration injects `REDIS_URL` automatically.
@@ -171,7 +183,12 @@ none should be shared. The server verifies tokens against the public JWKS at
 | `HUBSPOT_MCP_STATE_KEY` | from step 3 | Encrypts pending previews, undo snapshots and refresh tokens at rest |
 | `REDIS_URL` | injected by the integration | Selects the Redis backend automatically; no second variable to forget |
 | `HUBSPOT_MCP_OAUTH_ISSUER` | the AuthKit issuer from §2 | Turns on per-request OAuth. **Setting this replaces the shared-secret bearer** rather than stacking with it |
-| `HOME` | `/tmp` | The schema cache and trace log still write to disk, and only `/tmp` is writable on a serverless host |
+
+**Do not set `HUBSPOT_PORTAL` or any `HUBSPOT_TOKEN_*`.** With per-request OAuth
+the portal comes from each caller's token, so a process-wide portal is not a
+fallback — it is another customer's CRM sitting behind any path that fails to
+resolve the caller. The server refuses to start if either is present.
+| ~~`HOME`~~ | — | Already set to `/tmp` in `vercel.json`; nothing to do |
 
 The resource identifier the server verifies against is derived as
 `HUBSPOT_MCP_PUBLIC_URL` + `/mcp`, so it matches the Resource Indicator

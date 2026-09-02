@@ -26,17 +26,20 @@ PUBLIC_BIND = "0.0.0.0"  # noqa: S104 — the subject of these tests
 
 
 def _in_hosted_server(code: str, **env: str) -> str:
-    """Run `code` in a fresh interpreter with the server imported."""
+    """Run `code` in a fresh interpreter with the server imported.
+
+    `HUBSPOT_PORTAL` is set only when hosted OAuth is off: with it on, an
+    ambient portal is a startup failure by design (see
+    `tenancy.enforce_no_ambient_portal`).
+    """
+    base = {"PATH": "/usr/bin:/bin", "HOME": "/tmp"}
+    if not env.get("HUBSPOT_MCP_OAUTH_ISSUER", "").strip():
+        base["HUBSPOT_PORTAL"] = "99999999"
     result = subprocess.run(
         [sys.executable, "-c", "import hubspot_mcp.server as s\n" + code],
         capture_output=True,
         text=True,
-        env={
-            "PATH": "/usr/bin:/bin",
-            "HOME": "/tmp",
-            "HUBSPOT_PORTAL": "99999999",
-            **env,
-        },
+        env={**base, **env},
     )
     assert result.returncode == 0, result.stderr
     return result.stdout.strip()

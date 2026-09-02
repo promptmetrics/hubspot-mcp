@@ -105,3 +105,41 @@ def enforce_single_tenant(
         )
         return portal_id
     raise MultiTenantConfiguration(f"Refusing to serve on {host}:\n{detail}")
+
+
+class AmbientPortalConfigured(RuntimeError):
+    """Raised when a multi-tenant deployment also has a process-wide portal."""
+
+
+def enforce_no_ambient_portal(env: dict[str, str] | None = None) -> None:
+    """Verify a hosted deployment has no process-wide portal to fall back to.
+
+    The inverse of :func:`enforce_single_tenant`. Once the portal comes from the
+    caller's token, a portal configured in the environment is not a default —
+    it is a *different customer's CRM* sitting behind any code path that fails
+    to resolve the caller. Refusing to start is the only way to guarantee no
+    such path can silently succeed.
+    """
+    source = env if env is not None else os.environ
+    problems: list[str] = []
+
+    if (source.get(PORTAL_ENV) or "").strip():
+        problems.append(
+            f"{PORTAL_ENV} is set, but this deployment resolves the portal from each "
+            "caller's access token. A process-wide portal is not a fallback here, it is "
+            "another customer's CRM behind any path that fails to resolve the caller."
+        )
+
+    token_portals = configured_token_portals(env)
+    if token_portals:
+        problems.append(
+            f"HUBSPOT_TOKEN_* credentials are present for {', '.join(sorted(token_portals))}. "
+            "Hosted deployments authenticate each user to their own portal through OAuth; "
+            "static portal tokens have no role and would bypass that."
+        )
+
+    if problems:
+        detail = "\n".join(f"  - {p}" for p in problems)
+        raise AmbientPortalConfigured(
+            f"Refusing to serve a multi-tenant deployment with an ambient portal:\n{detail}"
+        )
