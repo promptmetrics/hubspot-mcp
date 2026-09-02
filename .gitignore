@@ -28,3 +28,5 @@ oauth_states/
 
 # Reference copy of the source plugin (read-only build reference, not part of this server)
 reference/
+.vercel
+.env*
