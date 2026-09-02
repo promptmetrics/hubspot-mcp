@@ -1,6 +1,6 @@
 """The Vercel entrypoint (Phase 3, stage 1).
 
-Vercel imports `app.py` and serves `app`; it never calls `server.run`. So every
+Vercel imports `api/index.py` and serves `app`; it never calls `server.run`. So every
 guard has to be reachable from `build_http_app` — one that only fires under
 uvicorn fires nowhere in production. These tests import the entrypoint the way
 the platform does.
@@ -23,7 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 def _import_entrypoint(**env: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-c", "import app; print(type(app.app).__name__)"],
+        [sys.executable, "-c", "import importlib; m = importlib.import_module('api.index'); print(type(m.app).__name__)"],
         capture_output=True,
         text=True,
         cwd=ROOT,
@@ -90,27 +90,28 @@ def test_no_reserved_env_keys_in_the_config(vercel_config):
     assert not (declared & reserved), f"reserved keys in vercel.json env: {declared & reserved}"
 
 
-def test_no_root_level_function_patterns(vercel_config):
-    """`functions` keys must target `api/`.
+def test_every_function_pattern_targets_the_api_directory(vercel_config):
+    """A pattern outside `api/` fails the build outright.
 
-    A root-level entrypoint plus a `functions` block fails with "doesn't match
-    any Serverless Functions inside the `api` directory" — they are mutually
-    exclusive, and we use the root entrypoint.
+    "The pattern "app.py" defined in `functions` doesn't match any Serverless
+    Functions inside the `api` directory."
     """
-    for path in vercel_config.get("functions", {}):
+    patterns = vercel_config.get("functions", {})
+    assert patterns, "no functions configured; maxDuration would fall back to the default"
+    for path in patterns:
         assert path.startswith(("api/", "pages/api/")), (
             f"vercel.json configures {path}, which is not under api/ and will fail the build"
         )
+        assert (ROOT / path).exists(), f"vercel.json configures {path}, which does not exist"
 
 
-def test_the_declared_entrypoint_matches_a_real_file():
-    import tomllib
-
-    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    module, _, attribute = pyproject["tool"]["vercel"]["entrypoint"].partition(":")
-
-    assert (ROOT / f"{module}.py").exists()
-    assert attribute == "app"
+def test_all_paths_route_to_the_entrypoint(vercel_config):
+    """Without a catch-all rewrite only `/api/index` reaches the app — not
+    `/mcp`, `/healthz` or the connect routes."""
+    rewrites = vercel_config.get("rewrites", [])
+    assert any(
+        r["source"] == "/(.*)" and r["destination"] == "/api/index" for r in rewrites
+    ), "no catch-all rewrite; every route except /api/index would 404"
 
 
 def test_functions_run_in_the_same_region_as_redis(vercel_config):

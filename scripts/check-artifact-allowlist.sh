@@ -13,7 +13,7 @@
 # README.md, CHANGELOG.md, LICENSE, pyproject.toml, .gitignore
 set -u
 
-allow_regex='^(src/|tests/|bin/|hooks/|skills/|\.claude-plugin/|\.github/|scripts/check-artifact-allowlist\.sh$|docs/architecture\.md$|docs/phase-1-build-plan\.md$|docs/phase-2-build-plan\.md$|docs/hosted-setup\.md$|README\.md$|app\.py$|api/index\.py$|hubspot-app/|vercel\.json$|\.vercelignore$|requirements\.txt$|CHANGELOG\.md$|LICENSE$|pyproject\.toml$|\.gitignore$)'
+allow_regex='^(src/|tests/|bin/|hooks/|skills/|\.claude-plugin/|\.github/|scripts/check-artifact-allowlist\.sh$|docs/architecture\.md$|docs/phase-1-build-plan\.md$|docs/phase-2-build-plan\.md$|docs/hosted-setup\.md$|README\.md$|api/index\.py$|hubspot-app/|vercel\.json$|\.vercelignore$|requirements\.txt$|CHANGELOG\.md$|LICENSE$|pyproject\.toml$|\.gitignore$)'
 
 bad=$(git ls-files | grep -Ev "$allow_regex")
 if [ -n "$bad" ]; then
