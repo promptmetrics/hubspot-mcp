@@ -145,10 +145,57 @@ async def app_lifespan(server: MCPServer):
 # the advertised tool list becomes portal-dependent once capability gating
 # lands, and a shared intermediary must never serve one portal's list to
 # another. ``ttl_ms`` is a freshness hint only — ``listChanged`` still applies.
+# The Streamable HTTP mount path. Load-bearing beyond routing: the OAuth
+# resource identifier is this path appended to the public URL, and that string
+# has to match in three places — what the authorization server stamps as `aud`,
+# what we verify, and what the client sends as `resource`. One constant, so they
+# cannot drift.
+MCP_PATH = "/mcp"
+
+
+def _hosted_auth() -> tuple[Any, Any]:
+    """Return ``(AuthSettings, TokenVerifier)`` when hosted OAuth is configured.
+
+    Configured means ``HUBSPOT_MCP_OAUTH_ISSUER`` is set. Absent it, the server
+    stays on the Phase 1 path — stdio needs no authorization at all, and a
+    self-hosted HTTP deployment can still use the shared-secret bearer wrapper.
+    """
+    from mcp.server.auth.settings import AuthSettings
+    from pydantic import AnyHttpUrl
+
+    from hubspot_mcp.auth.connect import PUBLIC_URL_ENV
+    from hubspot_mcp.auth.token_verifier import ISSUER_ENV, JWTVerifier
+
+    issuer = os.getenv(ISSUER_ENV, "").strip().rstrip("/")
+    if not issuer:
+        return None, None
+
+    public_url = os.getenv(PUBLIC_URL_ENV, "").strip().rstrip("/")
+    if not public_url:
+        raise RuntimeError(
+            f"{ISSUER_ENV} is set but {PUBLIC_URL_ENV} is not. The resource identifier "
+            "is built from the public URL, and a token whose audience does not match it "
+            "is rejected — so serving without it would 401 every request."
+        )
+
+    resource = f"{public_url}{MCP_PATH}"
+    return (
+        AuthSettings(
+            issuer_url=AnyHttpUrl(issuer),
+            resource_server_url=AnyHttpUrl(resource),
+        ),
+        JWTVerifier(issuer, resource),
+    )
+
+
+_AUTH_SETTINGS, _TOKEN_VERIFIER = _hosted_auth()
+
 mcp = MCPServer(
     "hubspot-mcp",
     version=__version__,
     lifespan=app_lifespan,
+    auth=_AUTH_SETTINGS,
+    token_verifier=_TOKEN_VERIFIER,
     cache_hints={
         "tools/list": CacheHint(ttl_ms=300_000, scope="private"),
         "prompts/list": CacheHint(ttl_ms=300_000, scope="private"),
@@ -853,7 +900,16 @@ def build_http_app(host: str = "127.0.0.1") -> Any:
     portal_id, source = _resolve_portal_source()
     enforce_single_tenant(host, portal_id, source)
 
-    app = mcp.streamable_http_app(host=host)
+    app = mcp.streamable_http_app(streamable_http_path=MCP_PATH, host=host)
+
+    if _TOKEN_VERIFIER is not None:
+        # Per-request OAuth replaces the shared secret rather than stacking with
+        # it. The SDK's bearer backend already rejects unauthenticated requests
+        # and publishes the protected-resource metadata that tells a client
+        # where to authenticate; wrapping that in a second, shared credential
+        # would mean every user needed a secret nobody should be sharing.
+        return app
+
     secret = resolve_server_secret(host)
     if secret is None:
         return app

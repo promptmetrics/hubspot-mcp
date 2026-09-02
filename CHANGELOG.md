@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Phase 3 — stage 1: the server as an OAuth resource server
+
+- **Setting `HUBSPOT_MCP_OAUTH_ISSUER` turns on per-request OAuth.** The server
+  then publishes RFC 9728 protected-resource metadata, so a client discovers
+  where to authenticate with nothing configured, and rejects unverified requests
+  with the 401 the spec requires.
+- **OAuth replaces the shared-secret bearer rather than stacking with it.**
+  Requiring both would mean every user needed a secret nobody should be sharing.
+  Unset the issuer and the shared-secret path is unchanged, so self-hosting
+  still works.
+- **The resource identifier is `HUBSPOT_MCP_PUBLIC_URL` + the mount path**, from
+  one constant. That string has to match in three places — what the
+  authorization server stamps as `aud`, what we verify, and what the client
+  sends as `resource` — so it is derived rather than configured a fourth time.
+- An issuer set without a public URL **refuses to start**. Serving anyway would
+  401 every request with nothing visibly wrong.
+
 ### Phase 3 — stage 1: verifying MCP access tokens
 
 - **`JWTVerifier`** makes the hosted server an OAuth 2.1 resource server. It
