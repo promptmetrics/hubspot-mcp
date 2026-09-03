@@ -307,6 +307,28 @@ async def _session(ctx: Context) -> dict[str, Any]:
     return _lifespan(ctx)
 
 
+def _not_connected_result(lf: dict[str, Any]) -> dict[str, Any] | None:
+    """A normal result for a caller who has not linked HubSpot yet, or ``None``.
+
+    Not an error: having authenticated but not yet connected a portal is the
+    expected first-run state, and returning ``is_error`` for it is wrong twice
+    over. It tells the model something failed, and it routes the connect link —
+    which carries a single-use ticket — through the SDK's error logging.
+
+    ``auth_error`` without a ``connect_url`` is a genuine failure (no portal
+    configured, a broken credential) and still raises.
+    """
+    url = lf.get("connect_url")
+    if not url:
+        return None
+    return {
+        "status": "not_connected",
+        "message": lf.get("auth_error") or "No HubSpot account is connected for this user.",
+        "connect_url": url,
+        "next_step": "Open connect_url in a browser and authorise HubSpot, then retry.",
+    }
+
+
 def _lifespan(ctx: Context) -> dict[str, Any]:
     """Return the lifespan-context dict (single-portal mode only).
 
@@ -494,6 +516,8 @@ def _make_domain_wrapper(tool_def: ToolDef):
     async def wrapper(ctx: Context, **kwargs: Any) -> Any:
         lf = await _session(ctx)
         if lf.get("auth_error"):
+            if (guidance := _not_connected_result(lf)) is not None:
+                return guidance
             raise ToolError(lf["auth_error"])
 
         # Call-time entitlement check. Belt and braces: an inconclusive probe
@@ -573,9 +597,23 @@ def _domain_tool_registrations() -> list[tuple[str, Any, str]]:
 
 # --- Safety stateful tools (approve / reject / pending / audit / undo) --------
 
+class NotConnected(Exception):
+    """Carries the first-run guidance out of `_safety_ctx` to its caller.
+
+    `_safety_ctx` returns the session dict, so it has no way to return a result
+    instead; the safety tools catch this and return one.
+    """
+
+    def __init__(self, result: dict[str, Any]) -> None:
+        super().__init__(result["message"])
+        self.result = result
+
+
 async def _safety_ctx(ctx: Context) -> dict[str, Any]:
     lf = await _session(ctx)
     if lf.get("auth_error"):
+        if (guidance := _not_connected_result(lf)) is not None:
+            raise NotConnected(guidance)
         raise ToolError(lf["auth_error"])
     return lf
 
@@ -742,9 +780,29 @@ async def hubspot_route(ctx: Context, request_text: str) -> Any:
     return {"agents": agents, "rationale": rationale, "charters": charters}
 
 
+def _answering_when_not_connected(fn):
+    """Turn `_safety_ctx`'s NotConnected into a normal result.
+
+    Applied once at registration rather than in seven tool bodies: a new safety
+    tool then cannot forget it, and the SDK's signature introspection still sees
+    the wrapped function's own signature because `functools.wraps` copies
+    `__wrapped__`.
+    """
+    import functools
+
+    @functools.wraps(fn)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return await fn(*args, **kwargs)
+        except NotConnected as exc:
+            return exc.result
+
+    return wrapper
+
+
 def _safety_tool_registrations() -> list[tuple[str, Any, str]]:
     return [
-        (fn.__name__, fn, (fn.__doc__ or "").strip().split("\n")[0])
+        (fn.__name__, _answering_when_not_connected(fn), (fn.__doc__ or "").strip().split("\n")[0])
         for fn in (
             hubspot_approve_write,
             hubspot_reject_write,
@@ -779,7 +837,11 @@ def _make_agent_prompt(agent_key: str):
         from hubspot_mcp.agents import _AGENT_REGISTRY
 
         lf = await _session(ctx)
-        if lf.get("auth_error"):
+        # A charter is portal-sensitive but not portal-dependent: the builder
+        # tolerates None and simply omits custom object types. Refusing to
+        # render one because HubSpot is not connected yet would hide the
+        # instructions that explain how to use the server.
+        if lf.get("auth_error") and not lf.get("connect_url"):
             raise ToolError(lf["auth_error"])
         builder = _AGENT_REGISTRY[agent_key]
         # The builder takes the portal so it can name custom object types; it

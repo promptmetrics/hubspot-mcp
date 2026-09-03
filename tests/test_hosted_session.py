@@ -248,7 +248,10 @@ async def test_an_unconnected_caller_gets_a_connect_link(env, monkeypatch):
     session = await resolve(None)
 
     assert session["client"] is None
-    assert "https://mcp.example.com/connect/hubspot?ticket=" in session["auth_error"]
+    assert session["connect_url"].startswith("https://mcp.example.com/connect/hubspot?ticket=")
+    # The ticket is a single-use credential and `auth_error` becomes a logged
+    # exception message; the two must never be the same string.
+    assert "ticket=" not in session["auth_error"]
 
 
 async def test_a_transient_failure_does_not_offer_a_connect_link(env, monkeypatch):
@@ -264,8 +267,8 @@ async def test_a_transient_failure_does_not_offer_a_connect_link(env, monkeypatc
 
     session = await resolve(None)
 
-    assert "connect/hubspot?ticket=" not in session["auth_error"]
-    assert "bad minute" in session["auth_error"] or "could not refresh" in session["auth_error"]
+    assert session["connect_url"] is None, "a transient failure must not offer a link"
+    assert "could not refresh" in session["auth_error"]
 
 
 async def test_an_unmintable_link_still_explains_itself(env, monkeypatch, capsys):
@@ -313,6 +316,124 @@ async def test_the_session_carries_every_key_the_tools_read(env, monkeypatch):
     session = await resolve(None)
 
     assert set(session) == {
-        "client", "cache", "portal_config", "portal_id", "auth_error", "capabilities",
+        "client", "cache", "portal_config", "portal_id", "auth_error",
+        "connect_url", "capabilities",
     }
     await resolve.pool.close_all()
+
+
+# --------------------------------------------------------------------------- #
+# The connect link is a credential — it must not reach an error message
+# --------------------------------------------------------------------------- #
+
+
+async def test_the_ticket_never_appears_in_a_raised_error(env, monkeypatch):
+    """It did, in production. `Tool '…' failed: '… ?ticket=eADWykV5…'` — the SDK
+    logs tool errors, so the ticketed URL was written to the runtime logs on
+    every first-run tool call, where anyone with log access could redeem it.
+    """
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from hubspot_mcp import server
+
+    monkeypatch.setenv("HUBSPOT_MCP_PUBLIC_URL", "https://mcp.example.com")
+    monkeypatch.setattr("hubspot_mcp.app_credentials.get_client_id", lambda: "cid")
+    _with_connections(monkeypatch, InMemoryConnections())
+    resolve = build_session_resolver()
+    _as_caller(monkeypatch, ALICE)
+    server.set_session_resolver(resolve)
+    try:
+        session = await resolve(None)
+        assert "ticket=" in session["connect_url"]
+
+        raised: list[str] = []
+        try:
+            await server._safety_ctx(None)
+        except server.NotConnected as exc:
+            raised.append(str(exc))
+        except ToolError as exc:  # pragma: no cover — would be the regression
+            raised.append(str(exc))
+
+        assert raised, "_safety_ctx returned a session for an unconnected caller"
+        assert "ticket=" not in raised[0]
+    finally:
+        server.set_session_resolver(None)
+
+
+async def test_an_unconnected_caller_gets_a_result_not_an_error(env, monkeypatch):
+    """Authenticated-but-not-connected is the expected first-run state.
+
+    Returning `is_error` for it tells the model something broke, when the
+    correct response is "here is how to finish setting up".
+    """
+    from hubspot_mcp import server
+
+    monkeypatch.setenv("HUBSPOT_MCP_PUBLIC_URL", "https://mcp.example.com")
+    monkeypatch.setattr("hubspot_mcp.app_credentials.get_client_id", lambda: "cid")
+    _with_connections(monkeypatch, InMemoryConnections())
+    resolve = build_session_resolver()
+    _as_caller(monkeypatch, ALICE)
+    server.set_session_resolver(resolve)
+    try:
+        wrapper = server._make_domain_wrapper(
+            next(t for t in server.list_tools() if t.name == "hubspot_get_object")
+        )
+        result = await wrapper(ctx=None, object_type="contacts", object_id="1")
+    finally:
+        server.set_session_resolver(None)
+
+    assert result["status"] == "not_connected"
+    assert result["connect_url"].startswith("https://mcp.example.com/connect/hubspot?ticket=")
+    assert "connect_url" in result["next_step"]
+
+
+async def test_a_genuine_auth_failure_still_raises(env, monkeypatch):
+    """Only "not connected" is downgraded. A misconfigured portal is an error."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from hubspot_mcp import server
+
+    async def broken(ctx):
+        return {
+            "client": None,
+            "cache": None,
+            "portal_config": None,
+            "portal_id": None,
+            "auth_error": "Portal 123 is not authenticated.",
+            "connect_url": None,
+            "capabilities": None,
+        }
+
+    server.set_session_resolver(broken)
+    try:
+        with pytest.raises(ToolError, match="not authenticated"):
+            await server._safety_ctx(None)
+    finally:
+        server.set_session_resolver(None)
+
+
+async def test_a_safety_tool_answers_rather_than_failing(env, monkeypatch):
+    """The wrapper is applied at registration, so a new safety tool cannot
+    forget it."""
+    from hubspot_mcp import server
+
+    monkeypatch.setenv("HUBSPOT_MCP_PUBLIC_URL", "https://mcp.example.com")
+    monkeypatch.setattr("hubspot_mcp.app_credentials.get_client_id", lambda: "cid")
+    _with_connections(monkeypatch, InMemoryConnections())
+    server.set_session_resolver(build_session_resolver())
+    _as_caller(monkeypatch, ALICE)
+    try:
+        wrapped = dict((name, fn) for name, fn, _ in server._safety_tool_registrations())
+        result = await wrapped["hubspot_list_pending_writes"](ctx=None)
+    finally:
+        server.set_session_resolver(None)
+
+    assert result["status"] == "not_connected"
+    assert "ticket=" in result["connect_url"]
+
+
+def test_every_safety_tool_is_wrapped():
+    from hubspot_mcp import server
+
+    for name, fn, _ in server._safety_tool_registrations():
+        assert hasattr(fn, "__wrapped__"), f"{name} is not wrapped; it would raise instead of answering"
