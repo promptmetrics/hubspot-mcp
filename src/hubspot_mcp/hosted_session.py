@@ -111,12 +111,18 @@ def _refresher_for(subject: str):
     return refresh
 
 
-def _unresolved(reason: str) -> dict[str, Any]:
+def _unresolved(reason: str, connect_url: str | None = None) -> dict[str, Any]:
     """A session that answers `tools/list` but cannot act.
 
     The same shape the stdio path yields when a portal is unauthenticated, so
     tool bodies need no new branch — under 2026-07-28 there is no handshake in
     which to fail instead.
+
+    ``connect_url`` is kept out of ``reason`` deliberately. ``reason`` becomes a
+    raised error message and the SDK logs those, so a ticketed URL in it writes
+    a live single-use credential into the runtime logs on every first-run tool
+    call. Callers that can present a link read this field; anything that logs
+    reads only ``reason``.
     """
     return {
         "client": None,
@@ -124,6 +130,7 @@ def _unresolved(reason: str) -> dict[str, Any]:
         "portal_config": None,
         "portal_id": None,
         "auth_error": reason,
+        "connect_url": connect_url,
         "capabilities": None,
     }
 
@@ -145,7 +152,8 @@ def build_session_resolver(pool: ClientPool | None = None):
         try:
             portal_config = await HostedOAuthProvider().resolve(subject)
         except NotConnectedError as exc:
-            return _unresolved(await _connect_guidance(subject, exc))
+            reason, connect_url = await _connect_guidance(subject, exc)
+            return _unresolved(reason, connect_url)
 
         client = await clients.acquire(subject, portal_config)
         capabilities = await _capabilities(portal_config)
@@ -158,6 +166,7 @@ def build_session_resolver(pool: ClientPool | None = None):
             "portal_config": portal_config,
             "portal_id": portal_config.portal_id,
             "auth_error": None,
+            "connect_url": None,
             "capabilities": capabilities,
         }
 
@@ -176,16 +185,20 @@ async def _capabilities(portal_config: PortalConfig):
         return None
 
 
-async def _connect_guidance(subject: str, exc: NotConnectedError) -> str:
-    """Explain what to do, with a link where one will actually help."""
+async def _connect_guidance(subject: str, exc: NotConnectedError) -> tuple[str, str | None]:
+    """Return ``(message, connect_url)`` — never one string containing both.
+
+    The URL carries a single-use ticket. Splitting them is what keeps it out of
+    the error message, and so out of the logs.
+    """
     if not exc.reconnect_required:
         # Transient: a connect link would have them re-authorise for nothing.
-        return str(exc)
+        return str(exc), None
     try:
         from hubspot_mcp.auth.connect import ConnectFlow
 
         link = await ConnectFlow.from_env().issue_ticket(subject)
     except Exception as link_exc:  # noqa: BLE001 — guidance must not become a 500
         print(f"hubspot_mcp: could not mint a connect link: {link_exc}", file=sys.stderr)
-        return f"{exc} Ask an administrator for a HubSpot connect link."
-    return f"{exc} Connect your HubSpot account here: {link}"
+        return f"{exc} Ask an administrator for a HubSpot connect link.", None
+    return str(exc), link

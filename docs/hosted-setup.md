@@ -241,6 +241,29 @@ vercel redeploy <production-url> --scope <team>
 
 ---
 
+## 3d. Sign the HubSpot Acceptable Use Policy
+
+**Development → Projects → `hubspot-mcp` → Distribution** → review and sign the AUP.
+
+Until it is signed, installing the app anywhere other than a **developer test
+account** fails with:
+
+> The app could not be installed because the app developer has not signed the
+> acceptable use policy. Please contact the app developer.
+
+HubSpot blocks this at its own install screen and never redirects back, so
+nothing reaches this server and there is nothing in its logs to find. It is a
+one-time account action, not a configuration problem.
+
+You can prove the whole flow before signing by authorising a **developer test
+account**, which is exempt.
+
+> Legacy *app developer accounts* were deprecated in March 2026 and converted to
+> standard accounts. The `hs project` model uploads to whichever account is
+> authenticated, so there is no separate developer account to move the app into.
+
+---
+
 ## 4. Verify
 
 In order — each step only makes sense once the one before passes.

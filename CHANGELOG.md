@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Phase 3 — stage 1: a connect link is no longer an error
+
+- **A single-use connect ticket was being written to the runtime logs.** The
+  ticketed URL sat inside `auth_error`, which is raised as a `ToolError`, and the
+  SDK logs tool errors — so every first-run tool call wrote a live credential to
+  the logs. Anyone with log access could redeem an unused one and bind their own
+  HubSpot account to another user's identity. The message and the URL are now
+  separate fields; nothing that gets logged carries the ticket.
+- **"Not connected" is no longer reported as a failure.** Being authenticated
+  but not yet linked to HubSpot is the expected first-run state, and returning
+  `is_error` for it told the model something had broken. Tools now return
+  `{"status": "not_connected", "connect_url": …, "next_step": …}`. An
+  `auth_error` *without* a connect URL — a misconfigured portal, a dead
+  credential — still raises exactly as before.
+- Safety tools get this at registration rather than in seven tool bodies, so a
+  new one cannot forget it. Charters render without a portal instead of
+  refusing: withholding the instructions that explain how to connect, because
+  the user has not connected, helps nobody.
+
 ### Phase 3 — stage 1: hosted dependencies are runtime dependencies
 
 - **`redis`, `cryptography` and `pyjwt` moved from the `hosted` extra into
