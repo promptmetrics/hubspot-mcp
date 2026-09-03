@@ -461,7 +461,7 @@ def test_redis_backend_without_a_url_is_refused(monkeypatch):
 
 
 def test_the_stdio_path_never_imports_redis():
-    """`redis` and `cryptography` are the `[redis]` extra; the plugin install lacks them."""
+    """Selecting the file backend must not import redis, even though it is installed."""
     import subprocess
     import sys
 

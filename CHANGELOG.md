@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Phase 3 — stage 1: hosted dependencies are runtime dependencies
+
+- **`redis`, `cryptography` and `pyjwt` moved from the `hosted` extra into
+  `[project.dependencies]`, and `requirements.txt` is deleted.** Vercel installs
+  `[project.dependencies]` from `pyproject.toml` and nothing else — not extras,
+  and not `requirements.txt`, which it ignored entirely. The result was a
+  deployment that authenticated correctly and then failed every tool call with
+  `No module named 'redis'`.
+- The cost to the stdio install is small: `pyjwt` already arrives via `mcp`, and
+  `redis` is pure Python. The Redis modules are still imported lazily, so the
+  local path does not pay their import cost for a backend it never selects.
+
 ### Phase 3 — stage 1: the HubSpot app as code
 
 - **`hubspot-app/`** holds the HubSpot app definition, created with
