@@ -182,3 +182,7 @@ src/hubspot_mcp/                  the MCP server (79 domain + 7 safety/introspec
 ## License
 
 MIT.
+
+---
+
+Built by [Izzy Aly](https://github.com/iiizzzyyy) at [PromptMetrics](https://github.com/promptmetrics).
