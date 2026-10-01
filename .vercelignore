@@ -4,13 +4,16 @@
 # under `api/`, and a root-level entrypoint (see `[tool.vercel]` in
 # pyproject.toml) fails the build with "doesn't match any Serverless Functions
 # inside the `api` directory".
-tests/
-docs/
-scripts/
-.github/
-reference/
-skills/
-hooks/
-bin/
-.claude/
-.claude-plugin/
+# Patterns are gitignore syntax: anchor them to the repo root, or they also match the
+# same name anywhere under src/ -- an unanchored `skills/` stripped
+# src/hubspot_mcp/skills/ from the bundle and took the hosted server down.
+/tests/
+/docs/
+/scripts/
+/.github/
+/reference/
+/skills/
+/hooks/
+/bin/
+/.claude/
+/.claude-plugin/
