@@ -55,6 +55,15 @@
   single-portal lifespan instead of warming a second client. `hubspot_status` aggregates count
   failed calls and per-call latency. Trace reads take the file's tail.
 
+### Keep-alive cron (2026-10-01)
+
+- `GET /cron/keepalive`, scheduled weekly in `vercel.json`, writes a timestamp through the state
+  and connection stores' Redis client so a free-tier database is never deleted for inactivity.
+  Guarded by `CRON_SECRET`; 503 until that is set; file-backed stores are skipped. Prompted by the
+  hosted database being deleted for inactivity, which dropped every user's HubSpot connection.
+- `.vercelignore` patterns are anchored to the repo root, with a test, after an unanchored
+  `skills/` stripped the vendored skills from the bundle and took the hosted server down.
+
 ### Known
 
 - Undo does not restore a property that was blank before the write (HubSpot keeps the new

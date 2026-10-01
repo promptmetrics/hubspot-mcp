@@ -39,7 +39,8 @@ MIN_SECRET_LENGTH = 32
 
 # `/healthz` must answer unauthenticated or a platform health check cannot use
 # it. It exposes no portal data — see `server.healthz`.
-DEFAULT_PUBLIC_PATHS = frozenset({"/healthz"})
+# `/cron/keepalive` checks its own CRON_SECRET bearer, see `server.cron_keepalive`.
+DEFAULT_PUBLIC_PATHS = frozenset({"/healthz", "/cron/keepalive"})
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", ""})
 

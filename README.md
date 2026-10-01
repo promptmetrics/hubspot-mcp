@@ -147,6 +147,10 @@ who wants to run their *own* instance, for a client that cannot spawn a local pr
 host it, you hold the secret, it serves your portal only. (A team-only hosted deployment with
 per-user HubSpot sign-in also exists; see `docs/hosted-setup.md`.)
 
+A hosted deployment on Redis should set `CRON_SECRET`; `vercel.json` then runs a weekly
+`/cron/keepalive` that keeps a free-tier database from being deleted for inactivity
+(`docs/hosted-setup.md` §3e).
+
 Every HTTP deployment serves two surfaces from one process: `/mcp`, the full tool list, and
 `/mcp/routed`, the four-tool routed surface described above. Set `AI_GATEWAY_API_KEY` for Jev
 routing; without it `find_capabilities` and `hubspot_find_skills` fall back to keyword routing
