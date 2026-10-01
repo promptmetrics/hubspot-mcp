@@ -60,7 +60,7 @@ To sign in to your portal, run:
 ```
 
 This opens a browser to HubSpot; approve the scopes. After it prints
-`OAuth login succeeded`, the 86 HubSpot tools are live.
+`OAuth login succeeded`, the 88 HubSpot tools are live.
 
 > **First run:** the MCP server provisions an isolated Python venv on first
 > launch (this takes ~20–30s while it installs `mcp`, `httpx`, `pydantic`).
@@ -72,7 +72,7 @@ This opens a browser to HubSpot; approve the scopes. After it prints
 - **79 domain tools**: CRUD + search across contacts, companies, deals,
   tickets, tasks, owners, pipelines, stages, properties, lists, engagements,
   workflows, workflow blueprints, official-docs search, and more.
-- **7 safety and introspection tools**: `hubspot_approve_write`,
+- **9 safety, introspection and skill tools**: `hubspot_approve_write`,
   `hubspot_reject_write`, `hubspot_list_pending_writes`,
   `hubspot_list_recent_audit`, `hubspot_undo_write`, `hubspot_status`
   (portal entitlements + request/error/cost aggregates), and `hubspot_route`
@@ -80,6 +80,25 @@ This opens a browser to HubSpot; approve the scopes. After it prints
 - **44 charters as MCP prompts** (`hubspot_objects`, `hubspot_workflows`, …):
   per-domain operating instructions naming the tools that domain may use, its
   self-correction rules, and a mandatory re-fetch-and-compare after every write.
+
+### HubSpot's Sales skills, served
+
+The server ships HubSpot's "HubSpot Sales" skills (daily brief, call prep, follow-up, log call,
+contact lookup, pipeline pulse, import contacts, onboarding, and the general `hubspot` skill;
+Apache 2.0, unmodified). `hubspot_find_skills` routes a request to the skill(s) it needs, with a
+probability each, and `hubspot_load_skill` returns the skill with a header that maps its
+connector tool names onto this server's tools. Nobody installs skill files. On the 40-prompt
+eval the router picks the right skill 90% of the time (`bench/skill_eval.py`).
+
+### Routed surface (experimental)
+
+The same server also serves `/mcp/routed`: four tools instead of 88.
+`find_capabilities(task)` routes a request to the sales skill(s), the specialist charter(s)
+and the HubSpot tools it needs (Jev on Vercel AI Gateway, keyword fallback); `load_skill` and
+`load_charter` return them, and `call_hubspot(tool, args)` runs any tool through the same
+write gate. It cuts the tool definitions a session loads from about 33 KB to
+1.6 KB. Set `AI_GATEWAY_API_KEY` for Jev; without it routing is keyword-only.
+See `docs/architecture.md` D13 and `docs/routed-mode.md`.
 
 ### Approval tiers
 
@@ -122,11 +141,22 @@ hubspot-mcp auth status --portal <id>      # show auth state
 
 ### Serving over HTTP (optional, self-hosted)
 
-**There is no PromptMetrics-hosted instance, by design.** The plugin above runs on your machine
-against your own portal, which is the supported path: your credentials, your data, no third
-party in between. The HTTP transport exists for anyone who wants to run their *own* instance —
-for a client that cannot spawn a local process, say. You host it, you hold the secret, it
-serves your portal only.
+The plugin above runs on your machine against your own portal, which is the supported path:
+your credentials, your data, no third party in between. The HTTP transport exists for anyone
+who wants to run their *own* instance, for a client that cannot spawn a local process, say. You
+host it, you hold the secret, it serves your portal only. (A team-only hosted deployment with
+per-user HubSpot sign-in also exists; see `docs/hosted-setup.md`.)
+
+Every HTTP deployment serves two surfaces from one process: `/mcp`, the full tool list, and
+`/mcp/routed`, the four-tool routed surface described above. Set `AI_GATEWAY_API_KEY` for Jev
+routing; without it `find_capabilities` and `hubspot_find_skills` fall back to keyword routing
+and say so in their response.
+
+**What leaves the machine when Jev routes:** the text the model passes to `find_capabilities`
+or `hubspot_find_skills` (the user's request in their own words) and the tool and skill
+descriptions, sent to Vercel's AI Gateway and on to TypeSafe. No portal data and no record
+contents. Set `HUBSPOT_MCP_ROUTER=keyword` to keep routing on the server; the keyword router is
+weaker (42% vs 90% on the skill eval) but sends nothing anywhere.
 
 Every HTTP request must carry `Authorization: Bearer $HUBSPOT_MCP_SERVER_SECRET`
 — protocol `2026-07-28` has no handshake, so there is no connection to
@@ -164,7 +194,11 @@ bin/run-mcp.sh                    venv-provisioning MCP launcher
 bin/session-start.sh              SessionStart hook: writes app_credentials.json
 hooks/hooks.json                  SessionStart hook wiring
 skills/auth/SKILL.md              /hubspot-mcp:auth slash command
-src/hubspot_mcp/                  the MCP server (79 domain + 7 safety/introspection tools, 44 prompts)
+src/hubspot_mcp/                  the MCP server (79 domain + 9 safety/skill tools, 44 prompts)
+src/hubspot_mcp/routed.py         the routed surface: find_capabilities, call_hubspot, load_charter, load_skill
+src/hubspot_mcp/jev_router.py     Jev routing over HTTPS, keyword fallback
+src/hubspot_mcp/skills/           HubSpot's Sales skills (Apache 2.0, unmodified) and the tool-name mapping
+bench/                            paired session bench, skill eval, report (docs/routed-mode.md)
 ```
 
 ## Troubleshooting

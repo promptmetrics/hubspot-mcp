@@ -34,6 +34,7 @@ injected. ``tests/test_smoke.py`` pins this.
 import inspect
 import os
 import sys
+import time
 import typing
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -56,6 +57,7 @@ from hubspot_mcp.handlers import (
     handle_reject,
     handle_tool,
 )
+from hubspot_mcp.routed import ROUTED_INSTRUCTIONS, register_routed_tools
 from hubspot_mcp.tools import ToolDef, list_tools
 
 # Module-level config populated by ``configure_server`` before ``mcp.run()``.
@@ -107,6 +109,12 @@ def _unresolved_lifespan() -> dict[str, Any]:
     }
 
 
+# The single-portal lifespan context, while the full server's lifespan is open.
+# The routed server's lifespan reuses it instead of warming a second client and
+# probing the portal twice (the composite app enters the full lifespan first).
+_single_portal_context: dict[str, Any] | None = None
+
+
 def _make_provider(mode: str) -> TokenProvider:
     return OAuthProvider() if mode == "oauth" else EnvTokenProvider()
 
@@ -154,18 +162,22 @@ async def app_lifespan(server: MCPServer):
         except Exception as exc:  # noqa: BLE001 — surface any init failure as guidance
             auth_error = f"Failed to initialize HubSpot client for portal {portal_id}: {exc}"
 
+    context = {
+        "client": client,
+        "cache": cache,
+        "portal_config": portal_config,
+        "portal_id": portal_id,
+        "auth_error": auth_error,
+        "capabilities": capabilities,
+    }
+    global _single_portal_context
     try:
         if capabilities is not None and capabilities_conclusive:
             _unadvertise_unavailable_tools(capabilities)
-        yield {
-            "client": client,
-            "cache": cache,
-            "portal_config": portal_config,
-            "portal_id": portal_id,
-            "auth_error": auth_error,
-            "capabilities": capabilities,
-        }
+        _single_portal_context = context
+        yield context
     finally:
+        _single_portal_context = None
         if client is not None:
             try:
                 await client.close()
@@ -183,9 +195,14 @@ async def app_lifespan(server: MCPServer):
 # what we verify, and what the client sends as `resource`. One constant, so they
 # cannot drift.
 MCP_PATH = "/mcp"
+# The routed surface: three meta-tools over the same handlers. Its own OAuth
+# resource identifier, so a token minted for one surface is not accepted by the
+# other by accident.
+ROUTED_PATH = "/mcp/routed"
+_ROUTED_WELL_KNOWN = "/.well-known/oauth-protected-resource" + ROUTED_PATH
 
 
-def _hosted_auth() -> tuple[Any, Any]:
+def _hosted_auth(mcp_path: str = MCP_PATH) -> tuple[Any, Any]:
     """Return ``(AuthSettings, TokenVerifier)`` when hosted OAuth is configured.
 
     Configured means ``HUBSPOT_MCP_OAUTH_ISSUER`` is set. Absent it, the server
@@ -210,7 +227,7 @@ def _hosted_auth() -> tuple[Any, Any]:
             "is rejected — so serving without it would 401 every request."
         )
 
-    resource = f"{public_url}{MCP_PATH}"
+    resource = f"{public_url}{mcp_path}"
     return (
         AuthSettings(
             issuer_url=AnyHttpUrl(issuer),
@@ -221,16 +238,63 @@ def _hosted_auth() -> tuple[Any, Any]:
 
 
 _AUTH_SETTINGS, _TOKEN_VERIFIER = _hosted_auth()
+_ROUTED_AUTH_SETTINGS, _ROUTED_TOKEN_VERIFIER = _hosted_auth(ROUTED_PATH)
+
+# The full surface had no instructions before skills arrived; every tool was
+# self-describing. Skills are workflows the model should look up before it
+# improvises one, so the server now says so. Kept to the essentials.
+FULL_INSTRUCTIONS = (
+    "HubSpot CRM. For sales workflows (a daily brief, call prep, a follow-up email, logging a call, "
+    "a pipeline overview, importing contacts, onboarding) call hubspot_find_skills first with the "
+    "user's request in their own words, then hubspot_load_skill for the skill it names and follow it. "
+    "For a plain lookup or edit, use the tools directly. A write may return status='preview' with an "
+    "action_id: show it to the user and call hubspot_approve_write once they confirm."
+)
 
 mcp = MCPServer(
     "hubspot-mcp",
     version=__version__,
+    instructions=FULL_INSTRUCTIONS,
     lifespan=app_lifespan,
     auth=_AUTH_SETTINGS,
     token_verifier=_TOKEN_VERIFIER,
     cache_hints={
         "tools/list": CacheHint(ttl_ms=300_000, scope="private"),
         "prompts/list": CacheHint(ttl_ms=300_000, scope="private"),
+        "server/discover": CacheHint(ttl_ms=300_000, scope="private"),
+    },
+)
+
+
+@asynccontextmanager
+async def routed_lifespan(server: MCPServer):
+    """Lifespan for the routed surface.
+
+    Hosted: the full server's lifespan already installed the per-request
+    resolver, and a second install would race the first on teardown, so this
+    one only yields the placeholder. Single portal: reuse the full server's
+    context when its lifespan is open (the composite app enters it first), and
+    only resolve the portal again when the routed server runs on its own.
+    """
+    if _TOKEN_VERIFIER is not None:
+        yield _unresolved_lifespan()
+        return
+    if _single_portal_context is not None:
+        yield _single_portal_context
+        return
+    async with app_lifespan(server) as lf:
+        yield lf
+
+
+routed = MCPServer(
+    "hubspot-mcp-routed",
+    version=__version__,
+    instructions=ROUTED_INSTRUCTIONS,
+    lifespan=routed_lifespan,
+    auth=_ROUTED_AUTH_SETTINGS,
+    token_verifier=_ROUTED_TOKEN_VERIFIER,
+    cache_hints={
+        "tools/list": CacheHint(ttl_ms=300_000, scope="private"),
         "server/discover": CacheHint(ttl_ms=300_000, scope="private"),
     },
 )
@@ -504,6 +568,110 @@ def _mrtr_answer(ctx: Context) -> tuple[str, bool, int | None] | None:
     return (action_id, bool(content.get("approve")), content.get("confirm_count"))
 
 
+def _trace_tool_call(portal_id: str | None, name: str, mode: str, ok: bool, started: float) -> None:
+    """Record one ``tool_call`` trace event. ``HUBSPOT_MCP_TRACE=0`` switches it off; the
+    file lives under ``CONFIG_DIR/<portal>/`` (``/tmp`` on Vercel, per instance and ephemeral)."""
+    from hubspot_mcp.trace import emit_safely
+
+    emit_safely(
+        portal_id,
+        "tool_call",
+        {"tool_name": name, "mode": mode, "ok": ok, "elapsed_ms": round((time.perf_counter() - started) * 1000, 1)},
+    )
+
+
+async def _run_domain_tool(
+    ctx: Context, name: str, kwargs: dict[str, Any], *, mode: str = "full"
+) -> Any:
+    """Run one domain tool the way its registered MCP wrapper does.
+
+    Shared by the 79 per-tool wrappers and by the routed mode's ``call_hubspot``
+    proxy, so the not-connected guidance, the call-time entitlement check, the
+    MRTR resume, the write gate in ``handle_tool`` and the inline confirmation
+    request behave identically whichever surface the model called. ``mode``
+    only labels the trace event, so a run can be split by surface afterwards.
+    """
+    started = time.perf_counter()
+    lf = await _session(ctx)
+    ok = False
+    try:
+        result = await _run_domain_tool_for(ctx, lf, name, kwargs)
+        ok = True
+        return result
+    finally:
+        _trace_tool_call(lf.get("portal_id"), name, mode, ok, started)
+
+
+async def _run_domain_tool_for(
+    ctx: Context, lf: dict[str, Any], name: str, kwargs: dict[str, Any]
+) -> Any:
+    if lf.get("auth_error"):
+        if (guidance := _not_connected_result(lf)) is not None:
+            return guidance
+        raise ToolError(lf["auth_error"])
+
+    # Call-time entitlement check. Belt and braces: an inconclusive probe
+    # leaves the tool advertised, so this is where the operator finds out
+    # WHY it cannot run, instead of the tool silently missing.
+    matrix = lf.get("capabilities")
+    if matrix is not None:
+        from hubspot_mcp.capabilities import (
+            capability_explanation,
+            missing_capabilities_for_tool,
+        )
+
+        missing = missing_capabilities_for_tool(name, matrix)
+        if missing:
+            raise ToolError(
+                f"{name} is unavailable on this HubSpot portal: "
+                + "; ".join(capability_explanation(f) for f in missing)
+            )
+
+    # MRTR resume: this retry carries the operator's answer plus the
+    # action_id minted on the first round. Resolve the pending preview
+    # instead of re-running the tool, which would mint a second one.
+    answer = _mrtr_answer(ctx)
+    if answer is not None:
+        action_id, approved, confirm_count = answer
+        handler, params = (
+            (handle_approve, {"action_id": action_id, "confirm_count": confirm_count})
+            if approved
+            else (handle_reject, {"action_id": action_id})
+        )
+        try:
+            result = await handler(
+                lf["client"], lf["cache"], lf["portal_config"], params
+            )
+        except HandlerError as exc:
+            raise ToolError(exc.error["message"]) from exc
+        return _raise_if_error(result["data"])
+
+    try:
+        result = await handle_tool(
+            lf["client"], lf["cache"], lf["portal_config"], {"tool_name": name, "input": kwargs}
+        )
+    except HandlerError as exc:
+        raise ToolError(exc.error["message"]) from exc
+    except ValueError as exc:
+        # Tool-side argument validation (unknown object_type and the like).
+        # Unwrapped, the SDK reports only "Error executing tool" and the model
+        # never learns which values are valid.
+        raise ToolError(str(exc)) from exc
+    data = _raise_if_error(result["data"])
+
+    # A write that needs a human decision asks for it inline, when the
+    # client can answer. AUTO-tier writes already applied and never reach
+    # here with status "preview".
+    if (
+        isinstance(data, dict)
+        and data.get("status") == "preview"
+        and data.get("action_id")
+        and _supports_form_elicitation(ctx)
+    ):
+        return _confirmation_request(data)
+    return data
+
+
 def _make_domain_wrapper(tool_def: ToolDef):
     """Build an async MCP wrapper that delegates one tool to ``handle_tool``."""
     domain_params = _domain_params(tool_def.func)
@@ -514,67 +682,7 @@ def _make_domain_wrapper(tool_def: ToolDef):
     name = tool_def.name
 
     async def wrapper(ctx: Context, **kwargs: Any) -> Any:
-        lf = await _session(ctx)
-        if lf.get("auth_error"):
-            if (guidance := _not_connected_result(lf)) is not None:
-                return guidance
-            raise ToolError(lf["auth_error"])
-
-        # Call-time entitlement check. Belt and braces: an inconclusive probe
-        # leaves the tool advertised, so this is where the operator finds out
-        # WHY it cannot run, instead of the tool silently missing.
-        matrix = lf.get("capabilities")
-        if matrix is not None:
-            from hubspot_mcp.capabilities import (
-                capability_explanation,
-                missing_capabilities_for_tool,
-            )
-
-            missing = missing_capabilities_for_tool(name, matrix)
-            if missing:
-                raise ToolError(
-                    f"{name} is unavailable on this HubSpot portal: "
-                    + "; ".join(capability_explanation(f) for f in missing)
-                )
-
-        # MRTR resume: this retry carries the operator's answer plus the
-        # action_id minted on the first round. Resolve the pending preview
-        # instead of re-running the tool, which would mint a second one.
-        answer = _mrtr_answer(ctx)
-        if answer is not None:
-            action_id, approved, confirm_count = answer
-            handler, params = (
-                (handle_approve, {"action_id": action_id, "confirm_count": confirm_count})
-                if approved
-                else (handle_reject, {"action_id": action_id})
-            )
-            try:
-                result = await handler(
-                    lf["client"], lf["cache"], lf["portal_config"], params
-                )
-            except HandlerError as exc:
-                raise ToolError(exc.error["message"]) from exc
-            return _raise_if_error(result["data"])
-
-        try:
-            result = await handle_tool(
-                lf["client"], lf["cache"], lf["portal_config"], {"tool_name": name, "input": kwargs}
-            )
-        except HandlerError as exc:
-            raise ToolError(exc.error["message"]) from exc
-        data = _raise_if_error(result["data"])
-
-        # A write that needs a human decision asks for it inline, when the
-        # client can answer. AUTO-tier writes already applied and never reach
-        # here with status "preview".
-        if (
-            isinstance(data, dict)
-            and data.get("status") == "preview"
-            and data.get("action_id")
-            and _supports_form_elicitation(ctx)
-        ):
-            return _confirmation_request(data)
-        return data
+        return await _run_domain_tool(ctx, name, kwargs)
 
     wrapper.__name__ = name
     wrapper.__qualname__ = name
@@ -780,6 +888,69 @@ async def hubspot_route(ctx: Context, request_text: str) -> Any:
     return {"agents": agents, "rationale": rationale, "charters": charters}
 
 
+async def hubspot_find_skills(ctx: Context, request_text: str) -> Any:
+    """Find which of HubSpot's Sales skills (daily brief, call prep, follow-up, log call, contact lookup, pipeline pulse, import, onboarding) a request needs, with a probability each; then call hubspot_load_skill."""
+    from hubspot_mcp.jev_router import route
+    from hubspot_mcp.routed import _emit, skill_descriptions
+    from hubspot_mcp.skills import load_skills
+    from hubspot_mcp.skills.mapping import server_tools_for
+
+    lf = await _safety_ctx(ctx)
+    text = (request_text or "").strip()
+    if len(text) < 3:
+        raise ToolError("request_text must describe the request in the user's own words.")
+    decision = await route(text, charters={}, tools={}, skills=skill_descriptions(), portal_id=lf.get("portal_id"))
+    skills = [
+        {
+            "name": s.name,
+            "probability": s.probability,
+            "description": load_skills()[s.name].description[:300],
+            "tools_on_this_server": server_tools_for(load_skills()[s.name].tools),
+        }
+        for s in decision.skills
+    ]
+    if decision.primary_skill:
+        next_step = f'Call hubspot_load_skill(name="{decision.primary_skill}") and follow that workflow.'
+    else:
+        next_step = "No sales skill applies. Use the HubSpot tools directly."
+    _emit(
+        lf.get("portal_id"),
+        "route_decision",
+        {
+            "router": decision.router,
+            "mode": "full",
+            "primary_skill": decision.primary_skill,
+            "skills": [s.name for s in decision.skills],
+            "routing_ms": decision.routing_ms,
+            "routing_cost_usd": decision.cost_usd,
+            "note": decision.note,
+        },
+    )
+    out: dict[str, Any] = {
+        "router": decision.router,
+        "primary_skill": decision.primary_skill,
+        "skills": skills,
+        "skill_choice_distribution": decision.skill_distribution,
+        "next_step": next_step,
+        "routing_ms": decision.routing_ms,
+    }
+    if decision.note:
+        out["note"] = decision.note
+    if decision.cost_usd is not None:
+        out["routing_cost_usd"] = decision.cost_usd
+    return out
+
+
+async def hubspot_load_skill(ctx: Context, name: str) -> str:
+    """Load one of HubSpot's Sales skills (or the account-research / brief-fetcher helper) with a header mapping its tool names onto this server."""
+    from hubspot_mcp.routed import render_skill
+
+    lf = await _session(ctx)
+    if lf.get("auth_error") and not lf.get("connect_url"):
+        raise ToolError(lf["auth_error"])
+    return render_skill(name, routed=False)
+
+
 def _answering_when_not_connected(fn):
     """Turn `_safety_ctx`'s NotConnected into a normal result.
 
@@ -811,6 +982,8 @@ def _safety_tool_registrations() -> list[tuple[str, Any, str]]:
             hubspot_undo_write,
             hubspot_status,
             hubspot_route,
+            hubspot_find_skills,
+            hubspot_load_skill,
         )
     ]
 
@@ -891,6 +1064,7 @@ def _register_all_tools() -> None:
 
 _register_all_tools()
 _register_agent_prompts()
+register_routed_tools(routed)
 
 
 @mcp.custom_route("/connect/hubspot", methods=["GET"])
@@ -979,6 +1153,58 @@ async def healthz(request: Any) -> Any:
     return JSONResponse({"status": "ok", "version": __version__})
 
 
+class _SplitSurfaces:
+    """One ASGI app serving the full surface and the routed surface.
+
+    Starlette's ``Mount`` strips the path prefix and never runs a mounted app's
+    lifespan, while the SDK enters each server's lifespan exactly once from its
+    own Starlette app's lifespan. So this dispatches by raw path, without
+    stripping, and enters both apps' lifespan contexts from the one lifespan
+    the ASGI server runs.
+    """
+
+    def __init__(self, full: Any, routed_app: Any) -> None:
+        self._full = full
+        self._routed = routed_app
+
+    @property
+    def routes(self) -> list[Any]:
+        """Both apps' routes, for anyone inspecting the served surface."""
+        return [*self._full.routes, *self._routed.routes]
+
+    def _pick(self, path: str) -> Any:
+        if path == ROUTED_PATH or path.startswith(ROUTED_PATH + "/") or path.startswith(_ROUTED_WELL_KNOWN):
+            return self._routed
+        return self._full
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] == "lifespan":
+            await self._lifespan(scope, receive, send)
+            return
+        await self._pick(scope.get("path", ""))(scope, receive, send)
+
+    async def _lifespan(self, scope: Any, receive: Any, send: Any) -> None:
+        message = await receive()
+        if message["type"] != "lifespan.startup":
+            return
+        started = False
+        try:
+            async with (
+                self._full.router.lifespan_context(self._full),
+                self._routed.router.lifespan_context(self._routed),
+            ):
+                started = True
+                await send({"type": "lifespan.startup.complete"})
+                await receive()  # lifespan.shutdown
+        except BaseException as exc:
+            if not started:
+                await send({"type": "lifespan.startup.failed", "message": str(exc)})
+            else:
+                await send({"type": "lifespan.shutdown.failed", "message": str(exc)})
+            raise
+        await send({"type": "lifespan.shutdown.complete"})
+
+
 def build_http_app(host: str = "127.0.0.1") -> Any:
     """Return the Streamable HTTP ASGI app, guarded by per-request bearer auth.
 
@@ -1007,7 +1233,9 @@ def build_http_app(host: str = "127.0.0.1") -> Any:
         enforce_no_ambient_portal()
         enforce_durable_state()
 
-    app = mcp.streamable_http_app(streamable_http_path=MCP_PATH, host=host)
+    full_app = mcp.streamable_http_app(streamable_http_path=MCP_PATH, host=host)
+    routed_app = routed.streamable_http_app(streamable_http_path=ROUTED_PATH, host=host)
+    app = _SplitSurfaces(full_app, routed_app)
 
     if _TOKEN_VERIFIER is not None:
         # Per-request OAuth replaces the shared secret rather than stacking with

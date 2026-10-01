@@ -37,7 +37,9 @@ def test_the_entrypoint_builds_a_hosted_app():
         HUBSPOT_MCP_PUBLIC_URL=PUBLIC_URL,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "Starlette"
+    # Hosted auth must not sit inside the shared-secret wrapper. The app itself
+    # is the composite that serves both surfaces (`server._SplitSurfaces`).
+    assert result.stdout.strip() == "_SplitSurfaces", result.stdout
 
 
 def test_the_entrypoint_refuses_an_unconfigured_deployment():

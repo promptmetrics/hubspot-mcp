@@ -35,3 +35,6 @@ reference/
 
 # HubSpot CLI config — contains a personal access key.
 hubspot.config.yml
+
+# Benchmark session transcripts: local, may contain real portal data
+bench/runs/

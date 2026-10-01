@@ -47,10 +47,12 @@ jobs:
           python - <<'PY'
           import glob, zipfile, sys
           whl = glob.glob("dist-check/*.whl")[0]
-          data = [n for n in zipfile.ZipFile(whl).namelist()
-                  if "/blueprints/workflows/data/" in n and n.endswith(".json")]
-          print(f"{len(data)} blueprint JSON files packaged in {whl}")
-          sys.exit(0 if len(data) == 19 else 1)
+          names = zipfile.ZipFile(whl).namelist()
+          data = [n for n in names if "/blueprints/workflows/data/" in n and n.endswith(".json")]
+          skills = [n for n in names if "/skills/" in n and n.endswith(".md")]
+          print(f"{len(data)} blueprint JSON files and {len(skills)} skill markdown files packaged in {whl}")
+          # 19 blueprints; 9 SKILL.md + 2 helpers (the skills load via importlib.resources too)
+          sys.exit(0 if len(data) == 19 and len(skills) == 11 else 1)
           PY
 
       - name: Set up Node

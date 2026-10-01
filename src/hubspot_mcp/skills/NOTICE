@@ -1,0 +1,12 @@
+HubSpot Sales skills, version 2.3.0
+
+The SKILL.md files in the sibling folders, and the two helper files in _helpers/, are HubSpot's
+"HubSpot Sales" Claude plugin, copied unmodified from
+https://github.com/HubSpot/hubspot-mcp-plugins (path HubSpot-Sales, commit a0c5960, 2026-09-11).
+They are licensed under the Apache License 2.0; see LICENSE in this folder. The rest of
+hubspot-mcp is MIT licensed.
+
+hubspot-mcp serves these files to MCP clients through hubspot_load_skill and load_skill. It
+changes nothing in them. It prepends a runtime header that maps the HubSpot connector tool names
+the skills use onto this server's tools and explains this server's write gate. HubSpot does not
+endorse or maintain this server.
