@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -120,24 +119,37 @@ def emit_trace(
     safe_entry["data"] = redact_dict_for_disk(safe_entry["data"])
     line = json.dumps(safe_entry, sort_keys=True) + "\n"
 
+    # Append, not rewrite. The upstream version copied the whole file into a
+    # temp file on every event; with one event per tool call that copy grows
+    # with the log and lands inside the latency being measured. A single
+    # ``write`` of one line is atomic on POSIX for lines this size.
     file_path = _trace_file_path(portal_id)
-    fd, temp_path = tempfile.mkstemp(dir=str(file_path.parent), suffix=".tmp")
+    with open(file_path, "a", encoding="utf-8") as f:
+        f.write(line)
+
+
+TRACE_ENV = "HUBSPOT_MCP_TRACE"
+
+
+def emit_safely(portal_id: str | None, event_type: str, data: dict[str, Any]) -> None:
+    """``emit_trace`` for telemetry call sites: never raises, off with ``HUBSPOT_MCP_TRACE=0``."""
+    if not portal_id or os.getenv(TRACE_ENV, "1") == "0":
+        return
     try:
-        with os.fdopen(fd, "w") as f:
-            if file_path.exists():
-                f.write(file_path.read_text())
-            f.write(line)
-        os.replace(temp_path, file_path)
-    except Exception:
-        os.unlink(temp_path)
-        raise
+        emit_trace(portal_id, event_type, new_trace_id(), data)
+    except Exception:  # noqa: BLE001 — telemetry must never fail a tool call
+        pass
 
 
 def get_recent_traces(portal_id: str, limit: int = 50) -> list[TraceEvent]:
     file_path = _trace_file_path(portal_id)
     if not file_path.exists():
         return []
-    lines = file_path.read_text().strip().splitlines()
+    # The file is append-only and grows with every tool call, so read only the tail.
+    from collections import deque
+
+    with open(file_path, encoding="utf-8") as fh:
+        lines = deque(fh, maxlen=limit)
     events: list[TraceEvent] = []
     for line in lines:
         if not line.strip():
@@ -221,9 +233,17 @@ def compute_status_aggregates(
         trace_events.sort(key=lambda e: e.timestamp)
         start = trace_events[0].timestamp
         end = trace_events[-1].timestamp
-        total_latency_ms += (end - start).total_seconds() * 1000
+        span_ms = (end - start).total_seconds() * 1000
+        # A single tool_call event carries its own elapsed_ms; a span of one
+        # event would otherwise count as zero latency.
+        if span_ms == 0:
+            span_ms = sum(float(e.data.get("elapsed_ms") or 0) for e in trace_events if e.event_type == "tool_call")
+        total_latency_ms += span_ms
 
-        has_error = any(e.event_type == "error" for e in trace_events)
+        has_error = any(
+            e.event_type == "error" or (e.event_type == "tool_call" and e.data.get("ok") is False)
+            for e in trace_events
+        )
         if has_error:
             error_count += 1
 

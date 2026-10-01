@@ -115,6 +115,16 @@ provider swappable.
    You can register several: staging and production, or a `.vercel.app` host now
    and a custom domain later.
 
+   **Data flow note for routing:** with `AI_GATEWAY_API_KEY` set, `hubspot_find_skills` on
+   `/mcp` and `find_capabilities` on `/mcp/routed` send the user's request text and the tool and
+   skill descriptions to Vercel's AI Gateway (TypeSafe's Jev). Set `HUBSPOT_MCP_ROUTER=keyword`
+   on a deployment that must not do that.
+
+   **If you expose the routed surface**, register `https://<your-domain>/mcp/routed` as a
+   second Resource Indicator. It has its own resource identifier on purpose: a token minted
+   for one surface is not accepted by the other (`server._hosted_auth(path)`). Production
+   serves `/mcp` only until the routed surface is deployed on purpose.
+
 5. Copy the **AuthKit domain** — the issuer, of the form
    `https://<something>.authkit.app`.
 

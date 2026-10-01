@@ -1,0 +1,40 @@
+{"id":"c01","tag":"clear","task":"Give me my daily brief","skills":["daily-brief"],"tools":["search_crm_objects","get_user_details"]}
+{"id":"c02","tag":"clear","task":"Prep me for my call with Jamie Chen at 3pm","skills":["call-prep"],"tools":["search_crm_objects","get_crm_objects"]}
+{"id":"c03","tag":"clear","task":"Draft a follow-up email to Sam Müller about the HubSpot sync proposal","skills":["follow-up"],"tools":["search_crm_objects","get_crm_objects","manage_crm_objects"]}
+{"id":"c04","tag":"clear","task":"Import these contacts from the CSV I just pasted","skills":["import-contacts"],"tools":["search_crm_objects","manage_crm_objects","get_properties"]}
+{"id":"c05","tag":"clear","task":"Just got off a call with Priya at Initech: they agreed the 12-month term, contract goes to their CFO next week. Log it.","skills":["log-call"],"tools":["search_crm_objects","manage_crm_objects"]}
+{"id":"c06","tag":"clear","task":"Give me a snapshot of my pipeline by stage","skills":["pipeline-pulse"],"tools":["search_crm_objects"]}
+{"id":"c07","tag":"clear","task":"Who is Morgan Lee?","skills":["contact-lookup"],"tools":["search_crm_objects","get_crm_objects"]}
+{"id":"c08","tag":"clear","task":"How many open deals do we have and what are they worth in total?","skills":["hubspot"],"tools":["search_crm_objects"]}
+{"id":"c09","tag":"clear","task":"I just set up a new HubSpot portal for our team, where do I start?","skills":["onboarding"],"tools":["get_user_details","search_crm_objects"]}
+{"id":"c10","tag":"clear","task":"Move the Acme RevOps deal's close date to next Friday","skills":["hubspot"],"tools":["search_crm_objects","manage_crm_objects"]}
+{"id":"c11","tag":"clear","task":"Which deals have no next step set?","skills":["pipeline-pulse"],"tools":["search_crm_objects"]}
+{"id":"c12","tag":"clear","task":"Write a re-engagement email to Luca Rossi, we haven't spoken in over a month","skills":["follow-up"],"tools":["search_crm_objects","get_crm_objects"]}
+{"id":"c13","tag":"clear","task":"Add the 15 people from this list to HubSpot and put them all under Wonka","skills":["import-contacts"],"tools":["search_crm_objects","manage_crm_objects"]}
+{"id":"b01","tag":"boundary","task":"What should I be working on today?","skills":["daily-brief"],"tools":["search_crm_objects","get_user_details"]}
+{"id":"b02","tag":"boundary","task":"Which of my deals are stalling?","skills":["pipeline-pulse"],"tools":["search_crm_objects"]}
+{"id":"b03","tag":"boundary","task":"I spoke to Chris Dubois this morning, legal is done and he signs after the board meeting","skills":["log-call"],"tools":["search_crm_objects","manage_crm_objects"]}
+{"id":"b04","tag":"boundary","task":"Send Chris Dubois a note thanking him for the legal review and confirming next steps","skills":["follow-up"],"tools":["search_crm_objects","get_crm_objects"]}
+{"id":"b05","tag":"boundary","task":"Tell me about Alex Rivera","skills":["contact-lookup"],"tools":["search_crm_objects","get_crm_objects"]}
+{"id":"b06","tag":"boundary","task":"I'm meeting Alex Rivera in an hour, what do I need to know?","skills":["call-prep"],"tools":["search_crm_objects","get_crm_objects"]}
+{"id":"b07","tag":"boundary","task":"What's overdue on my plate?","skills":["daily-brief"],"tools":["search_crm_objects"]}
+{"id":"b08","tag":"boundary","task":"Which deals are closing this month and which ones have gone quiet?","skills":["pipeline-pulse"],"tools":["search_crm_objects"]}
+{"id":"b09","tag":"boundary","task":"Add a new contact: Dana Scott, dana@initech.example.com, IT Lead at Initech","skills":["hubspot"],"tools":["search_crm_objects","manage_crm_objects"]}
+{"id":"b10","tag":"boundary","task":"Here are 40 leads from the trade show, get them into HubSpot","skills":["import-contacts"],"tools":["search_crm_objects","manage_crm_objects"]}
+{"id":"b11","tag":"boundary","task":"Update the Hooli deal: they signed, mark it won","skills":["hubspot"],"tools":["search_crm_objects","manage_crm_objects"]}
+{"id":"b12","tag":"boundary","task":"Met with the Hooli team, they signed on the spot. Write it up and close the deal.","skills":["log-call"],"tools":["search_crm_objects","manage_crm_objects"]}
+{"id":"b13","tag":"boundary","task":"Which contacts haven't heard from me in two weeks?","skills":["daily-brief"],"tools":["search_crm_objects"]}
+{"id":"b14","tag":"boundary","task":"Show me the Wonka deal","skills":["hubspot"],"tools":["search_crm_objects","get_crm_objects"]}
+{"id":"b15","tag":"boundary","task":"Our HubSpot is empty and the team starts Monday, help me get it ready","skills":["onboarding"],"tools":["get_user_details","search_crm_objects"]}
+{"id":"b16","tag":"boundary","task":"How do I create a custom deal property in HubSpot?","skills":["hubspot"],"tools":["get_properties"]}
+{"id":"m01","tag":"multi","task":"Log my call with Robin Park and then draft the follow-up email","skills":["log-call","follow-up"],"tools":["search_crm_objects","manage_crm_objects","get_crm_objects"]}
+{"id":"m02","tag":"multi","task":"Prep me for the Globex demo and draft the email confirming the time","skills":["call-prep","follow-up"],"tools":["search_crm_objects","get_crm_objects","manage_crm_objects"]}
+{"id":"m03","tag":"multi","task":"Give me my brief for today and flag any deals that are stalling","skills":["daily-brief","pipeline-pulse"],"tools":["search_crm_objects","get_user_details"]}
+{"id":"m04","tag":"multi","task":"Import this list of contacts and then look up which of them already had open deals","skills":["import-contacts","contact-lookup"],"tools":["search_crm_objects","manage_crm_objects","get_crm_objects"]}
+{"id":"m05","tag":"multi","task":"Taylor Kim called to reschedule the workshop to next Thursday. Log it and send her a confirmation.","skills":["log-call","follow-up"],"tools":["search_crm_objects","manage_crm_objects","get_crm_objects"]}
+{"id":"m06","tag":"multi","task":"Who owns the Vandelay deal and what's the latest note on it?","skills":["hubspot"],"tools":["search_crm_objects","get_crm_objects","search_owners"]}
+{"id":"n01","tag":"none","task":"What's the weather in Lisbon tomorrow?","skills":[],"tools":[]}
+{"id":"n02","tag":"none","task":"Write a haiku about spreadsheets","skills":[],"tools":[]}
+{"id":"n03","tag":"none","task":"Explain the difference between OAuth and API keys","skills":[],"tools":[]}
+{"id":"n04","tag":"none","task":"Refactor this Python function to use a list comprehension","skills":[],"tools":[]}
+{"id":"n05","tag":"none","task":"Summarise this PDF about EU AI regulation","skills":[],"tools":[]}

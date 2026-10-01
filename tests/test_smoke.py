@@ -41,7 +41,7 @@ async def test_server_registers_81_tools():
 
     tools = await server.mcp.list_tools()
     names = {t.name for t in tools}
-    assert len(tools) == 86  # 79 domain + 7 safety/status/route
+    assert len(tools) == 88  # 79 domain + 7 safety/status/route + 2 skill tools
     for safety in (
         "hubspot_approve_write",
         "hubspot_reject_write",

@@ -19,6 +19,10 @@ def _isolate_home(tmp_path_factory, monkeypatch):
     """
     home = tmp_path_factory.mktemp("home")
     monkeypatch.setattr(Path, "home", lambda: home)
+    # Tool-call tracing writes under the module-level CONFIG_DIR, which this
+    # patch does not reach. Off by default; tests that assert on traces turn it
+    # on and patch CONFIG_DIR themselves.
+    monkeypatch.setenv("HUBSPOT_MCP_TRACE", "0")
     yield
 
 

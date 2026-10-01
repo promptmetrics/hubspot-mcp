@@ -2,6 +2,65 @@
 
 ## Unreleased
 
+### Routed surface, served skills, and a session bench (2026-10-01)
+
+- **A second MCP surface at `/mcp/routed`** with four tools: `find_capabilities(task)` routes a
+  request to HubSpot's Sales skills, the specialist charters and the tools it needs, with a
+  probability each and the tools' input schemas inline; `load_skill` and `load_charter` return
+  the workflow or the charter; `call_hubspot(tool, args)` runs any tool through the same code
+  path as the registered ones, so previews, approval, undo and audit are identical. Routing is
+  TypeSafe's Jev on Vercel's AI Gateway (`AI_GATEWAY_API_KEY`, or `VERCEL_OIDC_TOKEN`), with
+  the keyword router as fallback. Both surfaces serve from one process (`server._SplitSurfaces`);
+  the routed surface has its own OAuth resource identifier. See `docs/architecture.md` D13.
+- **HubSpot's "HubSpot Sales" skills 2.3.0 are served from the server** (Apache 2.0, vendored
+  unmodified under `src/hubspot_mcp/skills/` with LICENSE and NOTICE). On `/mcp`:
+  `hubspot_find_skills` and `hubspot_load_skill` (tool count 86 → 88). A runtime header maps
+  the skills' connector tool names onto this server's tools. The full surface gained server
+  instructions that tell the model to look skills up before improvising a workflow. D14.
+- **Tool calls are traced.** `emit_trace` appends instead of rewriting the file, every tool call
+  records `{tool_name, mode, ok, elapsed_ms}`, routing records `route_decision`, and
+  `hubspot_status` aggregates stop reporting zeros. `HUBSPOT_MCP_TRACE=0` disables.
+- **`bench/`:** a paired session bench (Claude Code headless, control / full / routed) with a
+  skill-routing eval, a report generator and a rescore tool. Results in `docs/routed-mode.md`,
+  `docs/bench-2026-10-01-report.md` and `docs/bench-2026-10-01-skills-report.md`. Short version:
+  the routed surface loads 12x less context up front and completes the same tasks, but costs
+  1.65x more per task because prompt caching already makes the full tool list cheap.
+
+### Fixes the bench surfaced
+
+- **Engagement creates posted to the wrong endpoint.** `hubspot_create_note` and siblings sent
+  `/crm/v3/objects/engagements` with `hs_engagement_type`; HubSpot rejected the association.
+  They now post to `/notes`, `/tasks`, `/emails`, `/meetings`, `/calls` and default
+  `hs_timestamp`, which HubSpot requires.
+- **Numeric strings pass property validation.** `amount: "12500"` was a `type_mismatch` although
+  HubSpot stores and accepts numbers as strings. Non-numeric strings still fail.
+- **Engagement objects are valid object types** for get, search, update and delete, so a note
+  can be read back after it is created, and undo of an engagement create can delete it. The
+  gate now records the engagement type on create; undo falls back to the tool name for older
+  snapshots.
+- **Tool-side `ValueError`s reach the model** as the validator's message instead of the SDK's
+  bare "Error executing tool".
+- **The disk redactor no longer hashes identifiers.** Tool names over 20 characters
+  (`hubspot_create_object`) were hashed as personal names in traces and the audit log.
+- **Hosted-auth tests** now check the intent (no shared-secret wrapper) instead of the app's
+  class name, which the composite surface changed.
+
+### After review (same day)
+
+- `find_capabilities` now returns the chosen skill's tools with schemas (they were merged after
+  the list was built). `call_hubspot` rejects unknown argument keys, as pydantic does on `/mcp`.
+- `HUBSPOT_MCP_ROUTER=keyword` keeps routing on the server; README and hosted-setup state what
+  Jev routing sends to Vercel's AI Gateway. The gateway URL must be https.
+- `jsonschema` is declared as a runtime dependency. The routed server reuses the full server's
+  single-portal lifespan instead of warming a second client. `hubspot_status` aggregates count
+  failed calls and per-call latency. Trace reads take the file's tail.
+
+### Known
+
+- Undo does not restore a property that was blank before the write (HubSpot keeps the new
+  value when the original is empty). Noted in `docs/routed-mode.md`.
+- Routed mode is not deployed; production serves `/mcp` only.
+
 ### Phase 3 — stage 1: a connect link is no longer an error
 
 - **A single-use connect ticket was being written to the runtime logs.** The

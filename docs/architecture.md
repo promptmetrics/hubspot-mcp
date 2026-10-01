@@ -372,3 +372,70 @@ Reviewers, please focus on:
 - [ ] **D7 (Cloud Run + Upstash).** Any org constraint (existing infra, AWS-only, data residency) that changes the host choice?
 - [ ] **Section 6 Path B crux.** Should we de-risk the plugin-bundled-local-MCP-in-Cowork spike *now*, before P1, since it could make P3 unnecessary?
 - [ ] **Section 8 structure.** Does the proposed module split match team conventions?
+
+### D13 — A routed surface beside the full one, 2026-09-30
+
+- **Decision:** the same process serves two MCP surfaces. `/mcp` stays as it is: 86 tools, 44
+  charters as prompts. `/mcp/routed` advertises four tools — `find_capabilities(task)`,
+  `load_skill(name)`, `load_charter(name)`, `call_hubspot(tool, args)` — and routes each request to the charter(s)
+  and tools it needs with TypeSafe's Jev on Vercel's AI Gateway, falling back to the keyword
+  router in `agent_routing` when Jev cannot answer. `call_hubspot` dispatches through the
+  same `_run_domain_tool` as every registered wrapper, so the write gate, MRTR confirmation,
+  approval, undo and audit are identical on both surfaces.
+- **Why:** `tools/list` on `/mcp` is about 33 KB of JSON, roughly 12k tokens loaded into every
+  session before the first request (measured with Claude Code: 19.3k first-call context tokens
+  against 7.1k with no MCP; the routed surface adds about 1.3k). The charters already group the
+  tools by intent and `hubspot_route` already picks them; only the lazy-exposure step was
+  missing. The design is the one proven on the sibling Pipedrive proof of concept
+  (`agentic_skills/jev-pipedrive-mcp`, ADR-0001/0002 there); this port measures it on real
+  sessions, which that project never did.
+- **How it is wired:** a second `MCPServer` (`server.routed`) with its own OAuth resource
+  identifier (`PUBLIC_URL + /mcp/routed`; `_hosted_auth(path)` is parameterised) and a lifespan
+  that yields the hosted placeholder or re-runs `app_lifespan` for a single portal.
+  `build_http_app` composes both Starlette apps in `_SplitSurfaces`: raw-path dispatch (no prefix
+  stripping) and both lifespans entered from the one the ASGI server runs. Jev is a plain
+  `POST {gateway}/evaluation-model` from `jev_router.py` (`httpx`, 3 s timeout, `AI_GATEWAY_API_KEY`).
+- **Telemetry:** `emit_trace` now appends instead of rewriting the file, and every tool call on
+  either surface records a `tool_call` event `{tool_name, mode, ok, elapsed_ms}`; routing records
+  `route_decision`. `hubspot_status` aggregates stop reading zeros. `HUBSPOT_MCP_TRACE=0` disables.
+- **Measurement:** `bench/` runs the same 12 tasks through Claude Code headless against no MCP,
+  `/mcp` and `/mcp/routed`, and reports context, tokens, cost, time, turns, tool calls and
+  completion (`docs/routed-mode.md`).
+- **Measured (2026-10-01, `docs/routed-mode.md`):** 12x less context before the first request,
+  completion parity and identical write-gate behaviour, but 1.65x the cost and 1.4x the time per
+  task, because prompt caching already makes the 80-tool list cheap on every turn after the
+  first and routing adds round trips. The routed surface stays experimental; the next step is
+  to fold `load_charter` into `find_capabilities` and return fewer schemas, then re-measure on
+  a multi-server host where the context headroom matters.
+
+### D14 — HubSpot's Sales skills served from the server, routed per request, 2026-10-01
+
+- **Decision:** the nine skills of HubSpot's "HubSpot Sales" Claude plugin 2.3.0 (Apache 2.0) ship
+  inside the package (`src/hubspot_mcp/skills/`, byte-identical, with LICENSE and NOTICE) and are
+  served by tools instead of installed as files per machine. On `/mcp`: `hubspot_find_skills`
+  routes a request to the skill(s) it needs and `hubspot_load_skill` returns one. On
+  `/mcp/routed`: `find_capabilities` returns skills beside charters and tools, prefers a skill in
+  its `next_step` when one matches, and `load_skill` returns it. The plugin's two sub-agent
+  recipes ship as loadable helpers, because an MCP host has no sub-agents to delegate to.
+- **The mapping problem:** the skills name HubSpot's official connector tools
+  (`search_crm_objects`, `manage_crm_objects`, …), none of which exist here. A runtime header
+  prepended at serve time maps each connector name onto this server's tools and explains the
+  write gate; the skill text itself is never modified. The mapping is checked against the live
+  tool list in tests.
+- **Routing:** Jev's single request gains a choice over the nine skills plus "none" and a boolean
+  per skill (134 questions on the routed surface, 10 on `hubspot_find_skills`). The keyword
+  fallback scores the skills' own "ALWAYS use this skill when…" trigger phrases. On the 40
+  labelled prompts (13 clear, 16 boundary, 6 multi, 5 none): Jev 90% top-1, 13/16 boundary, 6/6
+  multi, 5/5 none, $0.00014 and 484 ms median per route; keyword 42%, 4/16 boundary. Gate (+15
+  points on boundary) passed at +56.
+- **Why:** a skill is a workflow (daily brief, call prep, log a call); a charter is a domain
+  manual. The bench showed charters reach the model only through a tool result; skills are
+  where HubSpot has already written the workflows users ask for, and serving them removes the
+  per-machine install that the first routed proof of concept set out to remove.
+- **Measured on the portal (`docs/routed-mode.md`):** four skill tasks, 3 reps, both surfaces: the
+  lookup picked the right skill and the model loaded it in 24/24 sessions, all tasks completed,
+  and the skills' own writes went through the gate and were undone. Routed cost about 1.4x the
+  full surface per skill task, as in the main bench.
+- **Licensing:** Apache 2.0 files inside an MIT repo, with the Apache licence text and a NOTICE in
+  the skills folder and a line in the top-level LICENSE. HubSpot neither endorses nor maintains
+  this server, and the NOTICE says so.

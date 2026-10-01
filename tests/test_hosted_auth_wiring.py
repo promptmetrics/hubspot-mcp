@@ -130,13 +130,16 @@ def test_no_protected_resource_metadata_without_hosted_auth():
 
 def test_hosted_auth_drops_the_shared_secret_wrapper():
     """Otherwise every user would need a secret nobody should be sharing."""
+    # The app is the composite serving both surfaces, so the check is the
+    # intent itself: hosted auth must not sit inside the shared-secret wrapper.
     out = _in_hosted_server(
-        "print(type(s.build_http_app('0.0.0.0')).__name__)",
+        "from hubspot_mcp.auth.bearer_middleware import BearerAuthMiddleware\n"
+        "print(isinstance(s.build_http_app('0.0.0.0'), BearerAuthMiddleware))",
         HUBSPOT_MCP_OAUTH_ISSUER=ISSUER,
         HUBSPOT_MCP_PUBLIC_URL=PUBLIC_URL,
         HUBSPOT_MCP_SERVER_SECRET="s" * 32,
     )
-    assert out == "Starlette"
+    assert out == "False"
 
 
 def test_without_hosted_auth_the_shared_secret_still_guards():

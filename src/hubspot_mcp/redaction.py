@@ -70,6 +70,11 @@ def _looks_like_name(value: str) -> bool:
     # Exclude URLs and domain-like strings from name heuristic
     if "://" in value or value.startswith("http") or ".com" in value or ".org" in value:
         return False
+    # Identifiers are not names: tool names such as ``hubspot_create_object`` are
+    # long, alphabetic and space-free, and were being hashed out of the trace
+    # and audit logs, which made per-tool aggregates unreadable.
+    if re.fullmatch(r"[A-Za-z0-9_.-]+", value) and "_" in value:
+        return False
     # Simple heuristic: mostly alphabetic characters and spaces, no digits
     alpha_or_space = sum(1 for c in value if c.isalpha() or c.isspace())
     return alpha_or_space / len(value) > 0.8 and not any(c.isdigit() for c in value)

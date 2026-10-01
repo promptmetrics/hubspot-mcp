@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from difflib import get_close_matches
 from typing import Any
 
@@ -43,7 +44,15 @@ def _type_compatible(value: Any, prop_type: str | None) -> bool:
     if prop_type == "string":
         return isinstance(value, str)
     if prop_type == "number":
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, (int, float)):
+            return True
+        # HubSpot's API stores and accepts numbers as strings ("12500"); models
+        # send them that way too. Reject only strings that are not numeric.
+        if isinstance(value, str):
+            return re.fullmatch(r"-?\d+(\.\d+)?", value.strip()) is not None
+        return False
     if prop_type == "bool":
         return isinstance(value, bool)
     if prop_type == "enumeration":

@@ -15,6 +15,19 @@ WARM_DOMAINS = ["contacts", "companies", "deals", "tickets"]
 # discovery.  ``tools/objects.py`` aliases this as ``_VALID_OBJECT_TYPES`` so the
 # tool path and the cache layer share one source of truth (avoids an import
 # cycle: ``tools.objects`` imports ``cache``, not the reverse).
+# HubSpot's engagement objects. They are first-class CRM objects on the v3
+# objects API (get, search, update, delete), but they carry no property schema
+# in the standard warm-up and are never custom, so the object tools accept them
+# alongside the standard set without touching the schema cache.
+ENGAGEMENT_OBJECT_TYPES = frozenset({"notes", "tasks", "calls", "emails", "meetings"})
+ENGAGEMENT_TOOL_OBJECTS = {
+    "hubspot_create_note": "notes",
+    "hubspot_create_task": "tasks",
+    "hubspot_create_call": "calls",
+    "hubspot_create_email": "emails",
+    "hubspot_create_meeting": "meetings",
+}
+
 STANDARD_OBJECT_TYPES = frozenset({
     "contacts",
     "companies",
@@ -45,7 +58,7 @@ async def ensure_custom_schema_cached(
     succeed on a cold cache.  Idempotent: it skips the HubSpot ``/schemas`` fetch
     when the type is built-in or already cached (within TTL).
     """
-    if not object_type or object_type in STANDARD_OBJECT_TYPES:
+    if not object_type or object_type in STANDARD_OBJECT_TYPES or object_type in ENGAGEMENT_OBJECT_TYPES:
         return
     if SchemaCache(portal_config.portal_id).get(object_type) is not None:
         return
