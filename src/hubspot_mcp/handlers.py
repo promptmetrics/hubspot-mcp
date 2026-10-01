@@ -328,6 +328,12 @@ async def handle_tool(client, cache, portal_config: PortalConfig, params: dict[s
     if not isinstance(tool_input, dict):
         raise HandlerError("validation", "'input' must be a JSON object.")
     target_object = tool_input.get("object_type") if isinstance(tool_input, dict) else None
+    if target_object is None:
+        # Engagement creates carry no object_type argument; record the object the
+        # tool writes so the undo snapshot knows what to delete.
+        from hubspot_mcp.cache import ENGAGEMENT_TOOL_OBJECTS
+
+        target_object = ENGAGEMENT_TOOL_OBJECTS.get(tool_name)
 
     required_scopes = get_required_scopes([tool_name], target_object)
     _check_tool_scope(tool_name, portal_config, target_object)
@@ -943,6 +949,10 @@ async def undo_action(
     metadata = snapshot.get("metadata", {})
     intent_type = metadata.get("intent_type")
     object_type = metadata.get("target_object")
+    if object_type is None:
+        from hubspot_mcp.cache import ENGAGEMENT_TOOL_OBJECTS
+
+        object_type = ENGAGEMENT_TOOL_OBJECTS.get(str(metadata.get("tool_name")))
 
     if intent_type == "delete":
         return False, "❌ Deletes are not undoable through HubSpot."

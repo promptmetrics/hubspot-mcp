@@ -124,3 +124,11 @@ def test_redact_dict_for_disk_custom_level():
     data = {"name": "Alice Wonderland"}
     result = redact_dict_for_disk(data, level="full")
     assert "Alice Wonderland" not in str(result)
+
+
+def test_identifiers_with_underscores_are_not_hashed_as_names():
+    from hubspot_mcp.redaction import redact
+
+    out = redact({"tool_name": "hubspot_create_object", "who": "Alexandra Featherstonehaugh Smythe"})
+    assert out["tool_name"] == "hubspot_create_object"
+    assert out["who"].startswith("<name:")

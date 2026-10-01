@@ -57,6 +57,16 @@ async def hubspot_search_engagements(
         return {"error": str(exc), "tool": "hubspot_search_engagements"}
 
 
+def _stamped(properties: dict[str, Any], timestamp: str | None = None) -> dict[str, Any]:
+    """HubSpot requires ``hs_timestamp`` on every engagement; default to now."""
+    from datetime import UTC, datetime
+
+    if timestamp:
+        properties["hs_timestamp"] = timestamp
+    properties.setdefault("hs_timestamp", datetime.now(UTC).isoformat())
+    return properties
+
+
 @tool(name="hubspot_create_note", description="Create a note engagement in HubSpot.")
 async def hubspot_create_note(
     body: str,
@@ -67,12 +77,12 @@ async def hubspot_create_note(
     if client is None:
         return {"error": "HubSpotClient not provided", "tool": "hubspot_create_note"}
     try:
-        properties = {"hs_engagement_type": "NOTE", "hs_note_body": body}
+        properties = _stamped({"hs_note_body": body})
         payload: dict[str, Any] = {"properties": properties}
         if associations:
             payload["associations"] = associations
         resp = await client.post(
-            "/crm/v3/objects/engagements",
+            "/crm/v3/objects/notes",
             portal_id=portal_id,
             body=payload,
             expected_scopes=["crm.objects.notes.write"],
@@ -94,17 +104,12 @@ async def hubspot_create_task(
     if client is None:
         return {"error": "HubSpotClient not provided", "tool": "hubspot_create_task"}
     try:
-        properties = {
-            "hs_engagement_type": "TASK",
-            "hs_task_subject": subject,
-            "hs_task_status": status,
-            "hs_timestamp": timestamp,
-        }
+        properties = _stamped({"hs_task_subject": subject, "hs_task_status": status}, timestamp)
         payload: dict[str, Any] = {"properties": properties}
         if associations:
             payload["associations"] = associations
         resp = await client.post(
-            "/crm/v3/objects/engagements",
+            "/crm/v3/objects/tasks",
             portal_id=portal_id,
             body=payload,
             expected_scopes=["crm.objects.tasks.write"],
@@ -125,12 +130,12 @@ async def hubspot_create_email(
     if client is None:
         return {"error": "HubSpotClient not provided", "tool": "hubspot_create_email"}
     try:
-        properties = {"hs_engagement_type": "EMAIL", "hs_email_subject": subject, "hs_email_body": body}
+        properties = _stamped({"hs_email_subject": subject, "hs_email_body": body})
         payload: dict[str, Any] = {"properties": properties}
         if associations:
             payload["associations"] = associations
         resp = await client.post(
-            "/crm/v3/objects/engagements",
+            "/crm/v3/objects/emails",
             portal_id=portal_id,
             body=payload,
             expected_scopes=["crm.objects.emails.write", "sales-email-read"],
@@ -151,12 +156,12 @@ async def hubspot_create_meeting(
     if client is None:
         return {"error": "HubSpotClient not provided", "tool": "hubspot_create_meeting"}
     try:
-        properties = {"hs_engagement_type": "MEETING", "hs_meeting_title": title, "hs_meeting_start_time": start_time}
+        properties = _stamped({"hs_meeting_title": title, "hs_meeting_start_time": start_time}, start_time)
         payload: dict[str, Any] = {"properties": properties}
         if associations:
             payload["associations"] = associations
         resp = await client.post(
-            "/crm/v3/objects/engagements",
+            "/crm/v3/objects/meetings",
             portal_id=portal_id,
             body=payload,
             expected_scopes=["crm.objects.appointments.write"],
@@ -177,12 +182,12 @@ async def hubspot_create_call(
     if client is None:
         return {"error": "HubSpotClient not provided", "tool": "hubspot_create_call"}
     try:
-        properties = {"hs_engagement_type": "CALL", "hs_call_title": title, "hs_call_duration": duration_ms}
+        properties = _stamped({"hs_call_title": title, "hs_call_duration": duration_ms})
         payload: dict[str, Any] = {"properties": properties}
         if associations:
             payload["associations"] = associations
         resp = await client.post(
-            "/crm/v3/objects/engagements",
+            "/crm/v3/objects/calls",
             portal_id=portal_id,
             body=payload,
             expected_scopes=["crm.objects.calls.write"],

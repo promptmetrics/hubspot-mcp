@@ -92,7 +92,7 @@ def test_type_compatible_number():
     assert _type_compatible(42, "number") is True
     assert _type_compatible(3.14, "number") is True
     assert _type_compatible(True, "number") is False
-    assert _type_compatible("42", "number") is False
+    assert _type_compatible("42", "number") is True  # HubSpot returns and accepts numbers as strings
 
 
 def test_type_compatible_bool():
@@ -179,3 +179,11 @@ def test_filter_writable_custom_object_static_fallback(tmp_path):
     )
     assert kept == {"serial": "SN-1"}
     assert stripped == ["hs_object_id"]
+
+
+def test_type_compatible_numeric_string():
+    assert _type_compatible("12500", "number") is True
+    assert _type_compatible(" 12.5 ", "number") is True
+    assert _type_compatible("thirty", "number") is False
+    assert _type_compatible("", "number") is False
+    assert _type_compatible(True, "number") is False
