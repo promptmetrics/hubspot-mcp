@@ -274,6 +274,26 @@ account**, which is exempt.
 
 ---
 
+## 3e. Keep the database alive
+
+Free-tier Redis offers delete a database after a period of inactivity, and a deleted database
+takes every hosted session's HubSpot connection and pending preview with it (it happened on
+2026-10-01). `vercel.json` therefore schedules `GET /cron/keepalive` every Monday at 06:00 UTC.
+The route writes one timestamp key through the stores' own Redis client and reads it back, so it
+counts as real traffic on any Redis-protocol provider.
+
+1. Add `CRON_SECRET` to the Vercel project (Production and Preview): any random string, for
+   example `openssl rand -hex 32`. Vercel sends it as `Authorization: Bearer …` on every cron
+   call; the route refuses other callers and returns 503 while the variable is unset.
+2. Redeploy. Vercel registers the cron from `vercel.json` on deployment; the project's Cron Jobs
+   tab shows it and lets you run it by hand once to confirm a 200 with `"touched": ["state",
+   "connections"]`.
+
+**If the Redis integration added a prefixed variable** (`hsmcp_REDIS_URL` or similar): the
+server reads `REDIS_URL` only, and refuses to start on a hosted deployment that has no
+`REDIS_URL`. Either reconnect the integration with an empty prefix, or set `REDIS_URL` to the
+same connection string and delete the prefixed one. Then redeploy.
+
 ## 4. Verify
 
 In order — each step only makes sense once the one before passes.

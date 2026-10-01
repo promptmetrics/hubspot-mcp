@@ -1140,6 +1140,57 @@ def _connect_page(heading: str, detail: str, *, ok: bool) -> Any:
     )
 
 
+CRON_SECRET_ENV = "CRON_SECRET"  # noqa: S105 — the env var name; Vercel sends its value as a bearer on cron calls
+KEEPALIVE_KEY = "hubspot_mcp:keepalive"
+
+
+@mcp.custom_route("/cron/keepalive", methods=["GET"])
+async def cron_keepalive(request: Any) -> Any:
+    """Touch the state stores so a free-tier database is never deleted for inactivity.
+
+    Vercel Cron calls this weekly (see ``vercel.json``) with
+    ``Authorization: Bearer $CRON_SECRET``; the route refuses anything else and
+    refuses to exist at all when ``CRON_SECRET`` is unset. It writes one
+    timestamp key through the same Redis client the stores use, so it counts
+    as real traffic on any Redis-protocol provider, and reads it back.
+    """
+    import hmac
+    from datetime import UTC, datetime
+
+    from starlette.responses import JSONResponse
+
+    from hubspot_mcp.state import get_store
+    from hubspot_mcp.state.connection_store import get_connection_store
+
+    secret = os.getenv(CRON_SECRET_ENV, "")
+    if not secret:
+        return JSONResponse({"error": "keepalive is not configured"}, status_code=503)
+    auth = request.headers.get("authorization", "")
+    if not hmac.compare_digest(auth, f"Bearer {secret}"):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    now = datetime.now(UTC).isoformat()
+    touched: list[str] = []
+    for label, store in (("state", get_store()), ("connections", get_connection_store())):
+        client = getattr(store, "_redis", None)
+        if client is None:
+            continue  # file-backed store: nothing to keep alive
+        try:
+            await _maybe_await(client.set(KEEPALIVE_KEY, now.encode()))
+            await _maybe_await(client.get(KEEPALIVE_KEY))
+            touched.append(label)
+        except Exception as exc:  # noqa: BLE001 — report, so the cron run shows red
+            return JSONResponse({"ok": False, "store": label, "error": str(exc)[:200]}, status_code=502)
+    return JSONResponse({"ok": True, "touched": touched, "at": now})
+
+
+async def _maybe_await(value: Any) -> Any:
+    """Redis clients here are sync; tolerate an async one as well."""
+    if hasattr(value, "__await__"):
+        return await value
+    return value
+
+
 @mcp.custom_route("/healthz", methods=["GET"])
 async def healthz(request: Any) -> Any:
     """Liveness probe. Public by design — reports nothing about the portal.
