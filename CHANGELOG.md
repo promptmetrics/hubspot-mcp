@@ -25,6 +25,17 @@
   `docs/bench-2026-10-01-report.md` and `docs/bench-2026-10-01-skills-report.md`. Short version:
   the routed surface loads 12x less context up front and completes the same tasks, but costs
   1.65x more per task because prompt caching already makes the full tool list cheap.
+- **Router comparison, Jev vs keyword (2026-10-02).** The bench runner takes `--arm-url NAME=URL`
+  so two instances of the same surface can be compared, and probes each routed arm's router at
+  startup, aborting when an arm named for Jev answers with keywords (Jev falls back silently when
+  `AI_GATEWAY_API_KEY` is missing). `bench/charter_eval.py` scores both routers on the 49-prompt
+  routing corpus; `bench/report.py --price-model` reprices a run at another model's list prices
+  and every report states its cost basis. Four boundary tasks (t17–t20) join `tasks.jsonl`.
+  Results in `docs/routed-mode.md` and `docs/bench-2026-10-02-*.md`: on the routed surface Jev
+  picked the labelled skill 24/24 against 14/24 and never let a generic charter outrank the
+  specific one; the model recovers from most wrong picks at the cost of turns, and failed the
+  task where the right skill was missing from the list. On Sonnet 5 the Jev arm was 14% cheaper
+  and 16% faster at median.
 
 ### Fixes the bench surfaced
 

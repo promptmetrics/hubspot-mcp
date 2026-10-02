@@ -61,10 +61,28 @@ def load_tasks(path: Path, subs: dict[str, str]) -> list[dict[str, Any]]:
     return tasks
 
 
-def mcp_config(arm: str, server: str, secret: str | None) -> dict[str, Any]:
+ARM_URLS: dict[str, str] = {}  # filled from --arm-url NAME=URL; built-in arms map onto --server
+
+
+def arm_url(arm: str, server: str) -> str | None:
     if arm == "control":
+        return None
+    if arm in ARM_URLS:
+        return ARM_URLS[arm]
+    return server.rstrip("/") + ("/mcp" if arm == "full" else "/mcp/routed")
+
+
+def full_url_for(arm: str, server: str) -> str:
+    """The full surface on the same server as the arm, for state checks and cleanup."""
+    url = arm_url(arm, server) or server.rstrip("/") + "/mcp"
+    return url.split("/mcp")[0] + "/mcp"
+
+
+def mcp_config(arm: str, server: str, secret: str | None) -> dict[str, Any]:
+    url = arm_url(arm, server)
+    if url is None:
         return {"mcpServers": {}}
-    entry: dict[str, Any] = {"type": "http", "url": server.rstrip("/") + ("/mcp" if arm == "full" else "/mcp/routed")}
+    entry: dict[str, Any] = {"type": "http", "url": url}
     if secret:
         entry["headers"] = {"Authorization": f"Bearer {secret}"}
     return {"mcpServers": {"hubspot": entry}}
@@ -141,10 +159,13 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
         elif t == "assistant":
             msg = ev.get("message", {})
             usage = msg.get("usage") or {}
+            cc = usage.get("cache_creation") or {}
             api_calls.append(
                 {
                     "input_tokens": usage.get("input_tokens", 0),
                     "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0),
+                    "cache_creation_1h_tokens": cc.get("ephemeral_1h_input_tokens", 0),
+                    "cache_creation_5m_tokens": cc.get("ephemeral_5m_input_tokens", 0),
                     "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0),
                     "output_tokens": usage.get("output_tokens", 0),
                     "ts": _ts(ev),
@@ -168,11 +189,14 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
                     tid = block.get("tool_use_id")
                     if tid in tool_calls:
                         text = _result_text(block)
+                        # Lookup answers carry the routing metadata the report reads, so keep
+                        # them whole; everything else is capped to keep session files small.
+                        keep = len(text) if str(tool_calls[tid].get("name", "")).split("__")[-1] in ROUTING_TOOLS else 20000
                         tool_calls[tid].update(
                             {
                                 "is_error": bool(block.get("is_error")),
                                 "result_chars": len(text),
-                                "result_text": text[:20000],
+                                "result_text": text[:keep],
                                 "result_ts": _ts(ev),
                             }
                         )
@@ -188,7 +212,8 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
     first = api_calls[0] if api_calls else {}
     totals = {
         k: sum(c.get(k, 0) for c in api_calls)
-        for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
+        for k in ("input_tokens", "cache_creation_input_tokens", "cache_creation_1h_tokens", "cache_creation_5m_tokens",
+                  "cache_read_input_tokens", "output_tokens")
     }
     totals["context_tokens_all_calls"] = (
         totals["input_tokens"] + totals["cache_creation_input_tokens"] + totals["cache_read_input_tokens"]
@@ -263,6 +288,36 @@ def _write_outcomes(summary: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _routing_events(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every find_capabilities / hubspot_find_skills answer the model received."""
+    out: list[dict[str, Any]] = []
+    for c in summary["tool_calls"]:
+        name = str(c.get("name", "")).split("__")[-1]
+        if name not in ("find_capabilities", "hubspot_find_skills"):
+            continue
+        try:
+            data = json.loads(c.get("result_text") or "")
+        except ValueError:
+            out.append({"tool": name, "error": (c.get("result_text") or "")[:120]})
+            continue
+        if not isinstance(data, dict):
+            continue
+        out.append({
+            "tool": name,
+            "router": data.get("router"),
+            "primary_skill": data.get("primary_skill"),
+            "primary_charter": data.get("primary_charter"),
+            "charters": [x.get("name") for x in data.get("charters", [])],
+            "skills": [x.get("name") for x in data.get("skills", [])],
+            "tools_returned": len(data.get("tools", [])),
+            "result_chars": c.get("result_chars", 0),
+            "routing_ms": data.get("routing_ms"),
+            "routing_cost_usd": data.get("routing_cost_usd"),
+            "note": data.get("note"),
+        })
+    return out
+
+
 def _skill_events(summary: dict[str, Any]) -> tuple[list[str], list[str]]:
     """(primary skills the lookups returned, skills the model loaded), either surface."""
     picked: list[str] = []
@@ -317,6 +372,11 @@ def check(task: dict[str, Any], summary: dict[str, Any], state: dict[str, Any], 
         results["text_any"] = any(s.lower() in text for s in spec["text_any"])
     if spec.get("no_hubspot_tools"):
         results["no_hubspot_tools"] = not any(n not in ROUTING_TOOLS for n in names)
+    if "charter_picked" in spec:
+        # Any of the listed charters is right; "a+b" labels mean either.
+        wanted = {c.strip() for part in (spec["charter_picked"] if isinstance(spec["charter_picked"], list) else [spec["charter_picked"]]) for c in part.split("+")}
+        routes = [r for r in _routing_events(summary) if r.get("primary_charter") is not None]
+        results["charter_picked"] = bool(routes) and routes[0]["primary_charter"] in wanted
     if "skill_picked" in spec or "skill_loaded" in spec:
         picked, loaded = _skill_events(summary)
         if "skill_picked" in spec:
@@ -379,12 +439,24 @@ def cleanup(surface: Surface, summary: dict[str, Any], state: dict[str, Any]) ->
     return done
 
 
+def _expected_router(arm: str) -> str | None:
+    """Arm names carry the router they are meant to test; a mismatch means the server lost
+    its gateway key (Jev falls back to keywords silently) and the run would compare nothing."""
+    if "jev" in arm:
+        return "jev"
+    if "kw" in arm or "keyword" in arm:
+        return "keyword"
+    return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--server", default="http://127.0.0.1:8000")
     ap.add_argument("--secret-env", default="HUBSPOT_MCP_SERVER_SECRET")
     ap.add_argument("--tasks", default=str(HERE / "tasks.jsonl"))
     ap.add_argument("--arms", default=",".join(ARMS))
+    ap.add_argument("--arm-url", action="append", default=[], metavar="NAME=URL",
+                    help="define an arm by its MCP URL, e.g. routed-kw=http://127.0.0.1:8001/mcp/routed; implies --arms")
     ap.add_argument("--reps", type=int, default=3)
     ap.add_argument("--model", default=None, help="Claude Code model alias; default is the CLI default")
     ap.add_argument("--only", default=None, help="comma-separated task ids")
@@ -397,7 +469,10 @@ def main() -> int:
     args = ap.parse_args()
 
     secret = os.getenv(args.secret_env) or None
-    arms = [a for a in args.arms.split(",") if a]
+    for spec in args.arm_url:
+        name, _, url = spec.partition("=")
+        ARM_URLS[name] = url
+    arms = list(ARM_URLS) if ARM_URLS else [a for a in args.arms.split(",") if a]
     subs = {
         "TEST_CONTACT": args.test_contact,
         "TEST_CONTACT_FIRST": args.test_contact.split()[0],
@@ -416,12 +491,22 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     full = Surface(args.server.rstrip("/") + "/mcp", secret)
     full.initialize()
+    surfaces: dict[str, Any] = {args.server.rstrip("/") + "/mcp": full}
 
     static: dict[str, Any] = {}
-    for arm in ("full", "routed"):
-        s = Surface(args.server.rstrip("/") + ("/mcp" if arm == "full" else "/mcp/routed"), secret)
+    for arm in [a for a in arms if a != "control"]:
+        s = Surface(arm_url(arm, args.server), secret)
         s.initialize()
         static[arm] = measure_tools_list(s.list_tools())
+        expected = _expected_router(arm)
+        if expected and "find_capabilities" in {t.get("name") for t in s.list_tools()}:
+            probe, _ = s.call_tool("find_capabilities", {"task": "list our active workflows"})
+            router = probe.get("router") if isinstance(probe, dict) else None
+            static[arm]["router"] = router
+            if router != expected:
+                note = probe.get("note") if isinstance(probe, dict) else probe
+                print(f"abort: arm {arm} routes with {router!r}, expected {expected!r}: {note}")
+                return 2
     (out / "tools_list.json").write_text(json.dumps(static, indent=2))
     print("tools/list:", json.dumps(static))
 
@@ -457,16 +542,22 @@ def main() -> int:
                 cleaned: dict[str, Any] = {}
                 if arm != "control":
                     try:
-                        state = portal_state(full, since)
+                        base = full_url_for(arm, args.server)
+                        if surfaces.get(base) is None:
+                            surfaces[base] = Surface(base, secret)
+                            surfaces[base].initialize()
+                        arm_full = surfaces[base]
+                        state = portal_state(arm_full, since)
                         if not args.no_cleanup:
-                            cleaned = cleanup(full, summary, state)
+                            cleaned = cleanup(arm_full, summary, state)
                     except RuntimeError as exc:
                         state = {"pending": [], "audit": [], "error": str(exc)}
                 verdict = check(task, summary, state, arm)
                 picked, loaded = _skill_events(summary)
+                routing = _routing_events(summary)
                 record = {
                     "n": n, "rep": rep, "task_id": task["id"], "kind": task["kind"], "arm": arm, "model": args.model,
-                    "skills_picked": picked, "skills_loaded": loaded,
+                    "skills_picked": picked, "skills_loaded": loaded, "routing": routing,
                     "since": since, "wall_ms": raw["wall_ms"], "returncode": raw["returncode"],
                     "summary": summary, "state": state, "cleanup": cleaned, "verdict": verdict, "stderr": raw["stderr"],
                 }

@@ -79,6 +79,16 @@ Operational note: do not start the server under `vercel env run` from another pr
 injects that project's `REDIS_URL`, which switches `state.get_store()` to Redis and requires
 `HUBSPOT_MCP_STATE_KEY`; every tool then fails.
 
+## Cost basis for every dollar figure below
+
+The sessions ran on a Claude subscription, so nothing was paid per token. Every cost is the
+API-equivalent at Anthropic's list prices for the model that ran, Claude Opus 5.5, as Claude Code
+reports it per session (`total_cost_usd`, basis "list"): $4 per million input tokens, $8 per
+million 1-hour cache writes, $0.20 per million cache reads, $20 per million output tokens
+(pricing page read 2026-10-02). `bench/report.py --price-model sonnet-5.5` reprices the same
+tokens at Sonnet 5.5 list prices ($2 / $4 / $0.20 / $10); that changes the dollar totals, not the
+behaviour, and the ratios between arms barely move because both arms used the same model.
+
 ## Results: full run, 2026-10-01
 
 12 tasks x 3 reps x 3 arms on the PromptMetrics portal, Claude Code 2.1.281 headless, model
@@ -206,6 +216,16 @@ lookups, which is harmless on the routed surface (the charter path takes over) a
 nothing on the full surface (the model uses the tools directly). Run through the live server
 with `--via-server http://127.0.0.1:8000`; results in `bench/runs/skill-eval-*.json`.
 
+### Charter routing eval, 49-prompt corpus (`bench/charter_eval.py`)
+
+On the server's own keyword-routing corpus (`tests/routing_corpus.yaml`, written for the keyword
+router), the two routers are at parity on charters: keyword 47/49, Jev 46/49, Jev answering 48/49
+at 633 ms and $0.00046 per route. Jev's extra miss was "show me the analytics for email opens".
+The contrast with skills (90% vs 42%) is the point: charter requests in this corpus are short and
+literal ("list workflows"), where keywords do well; skill requests are conversational ("what's on
+my plate"), where they don't. Jev also returned a median of 14 tools per route against the
+keyword router's charter-only sets, because it keeps every charter and skill at or above 0.5.
+
 ### Skill bench, four tasks on the real portal (`docs/bench-2026-10-01-skills-report.md`)
 
 Daily brief, call prep, log a call, follow-up draft; 3 reps; full and routed arms; Claude Code
@@ -263,11 +283,150 @@ cheaper way to get the same skills, and the routed surface pays for its context 
 turns. The win over installing skill files is identical on both: nobody installs anything, and
 the server can update a skill for everyone at once.
 
+## Jev vs keyword on the same surface (2026-10-02)
+
+The earlier runs compared surfaces. This one holds the surface fixed and swaps the router: two
+copies of the routed surface in two processes, port 8000 routing with Jev and port 8001 started
+with `HUBSPOT_MCP_ROUTER=keyword`. 20 tasks (the 12 from the main bench, the four skill tasks,
+and four new boundary prompts, t17–t20, written to sit between two skills or between a skill and
+a charter) x 3 reps x 2 arms = 120 sessions, model `claude-opus-5-5[1m]`, no session cut by rate
+limits. Reports: `docs/bench-2026-10-02-routers-report.md` (Opus 5.5 list price) and
+`docs/bench-2026-10-02-routers-report-sonnet.md` (same tokens at Sonnet 5.5 list price). Raw:
+`bench/runs/2026-10-02T05-58-55Z/` (gitignored).
+
+### Routing accuracy, offline and live
+
+| | Jev | Keyword |
+|---|---|---|
+| Skills, 40 labelled prompts (offline) | 90% | 42% |
+| Charters, 49-prompt corpus (offline) | 46/49 | 47/49 |
+| Charter right, live first lookup (42 charter-labelled sessions) | 35/42 | 32/42 |
+| Skill right, live first lookup (24 skill-labelled sessions) | 24/24 | 14/24 |
+| Lookups answered by the named router | 57/57 | 68/68 |
+| Routing latency, median | 651 ms | 0 ms |
+| Routing cost, per route / run | $0.0005 / $0.027 | $0 |
+
+The keyword router's live charter misses were all of one kind: a generic charter outranked the
+specific one. "Open deals with no next activity" went to `lists`; "list our active workflows"
+went to `objects` with `workflows` second; "which deal properties track why a deal was lost"
+went to `objects` with `properties` second. Jev got all three. Jev's seven "misses" are mostly
+a labelling artefact: on t17 and t19 it picked a skill (`log-call`, `contact-lookup`) and no
+charter, which is the designed behaviour when a skill matches, while the task label also listed
+an acceptable charter. Its one real miss was one rep of t10 routed to `triage` instead of
+`engagements`; the session still completed.
+
+On skills the gap is the offline one again. Keywords missed `log-call` on all three reps of t15
+(picked `call-prep`, with `log-call` second), and returned no skill at all for t17 ("I spoke to
+… this morning. Legal is done"), t20 ("which deals are closing this month and which have gone
+quiet") and one rep of t18 ("what should I be working on today"). None of those prompts contain
+a trigger phrase. Jev picked the labelled skill on all 24.
+
+### What a wrong pick cost
+
+| Per session, medians | routed-jev | routed-kw |
+|---|---|---|
+| Task completed (routing picks excluded) | 60/60 | 57/60 |
+| Expected skill loaded | 24/24 | 21/24 |
+| Context tokens, all calls | 234,636 | 190,898 |
+| Cost | $0.188 | $0.177 |
+| Cost, all 60 sessions | $14.97 | $13.84 |
+| Duration | 29 s | 29 s |
+| Turns | 11 | 10.5 |
+| HubSpot tool calls (excl. routing) | 8 | 8 |
+| Tools returned by the lookup | 24 | 22 |
+| Argument rejections by the proxy | 0 | 4 |
+| Tool errors (server-side, both arms mostly a missing `hs_next_activity_date` property) | 28 | 29 |
+
+Three keyword sessions failed the task itself: all three reps of t20, where no skill came back,
+the model worked from the `objects` charter and never loaded `pipeline-pulse`, so the answer
+listed deals without the skill's "gone quiet" logic. Everywhere else the model recovered from a
+bad pick on its own: on t15 it ignored the keyword router's `call-prep` primary and loaded
+`log-call` from second place in all three reps; on t02, t07 and t09 the right charter was in
+the list, just not first, and the model took the tools it needed anyway. Recovery is not free.
+The keyword arm's four argument rejections all happened on sessions that started from the wrong
+charter, and the paired table shows the pattern per task: when both routers picked right, the
+keyword arm was usually a little cheaper (no Jev round trip, two fewer schemas returned); when
+keywords picked wrong, the keyword arm cost more and took longer (t07 $0.160 vs $0.123, t17
+$0.286 vs $0.248 and 58 s vs 46 s, t19 $0.156 vs $0.109). Over the run that nets out to Jev
+costing 8% more per run than keywords for 3 more completed tasks and 10 more correct skill picks.
+
+Context went the other way from what the lookup sizes suggest. Jev returns more tools (24 vs
+22, 22k vs 18k characters per lookup) and its sessions used 23% more context tokens, but 80% of
+both arms' context was cache reads, so the dollar difference is 6%. Nine keyword sessions called
+`find_capabilities` a second time (re-routes); no Jev session did.
+
+### Verdict
+
+- Jev picks better where it matters: 24/24 vs 14/24 on skills live, 90% vs 42% offline, and it
+  never lost a specific charter to a generic one. Keyword routing is good enough for literal
+  charter requests ("list workflows") and fails on conversational ones, which is exactly what
+  skills are for.
+- A wrong pick usually costs a detour, not the task: the model reads past the primary and
+  recovers from the list. It costs the task when the right skill is absent from the list
+  entirely (t20, 0/3).
+- Jev's price is 651 ms and $0.0005 per route, under 0.3% of a session's cost. The context it
+  adds by returning more tools is mostly cached and shows up as about 6% on cost.
+- Net: on this surface Jev is the right default and the keyword router is a fallback, which is
+  how the server is wired. The result does not change the surface-level verdict above (full
+  surface with prompt caching is still cheaper per task); it changes how much to trust the
+  routed surface's picks.
+
+### Sonnet follow-up: the same four skill tasks on a smaller model
+
+Four skill tasks (t13–t16) x 3 reps x 2 routers on `--model sonnet`, which Claude Code 2.1.281
+resolved to `claude-sonnet-5` (not 5.5; same list prices, so no repriced copy). 24 sessions,
+report `docs/bench-2026-10-02-sonnet-routers-report.md`, raw `bench/runs/2026-10-02T15-43-59Z/`.
+The runner's startup probe confirmed `jev` on port 8000 and `keyword` on 8001; an earlier
+attempt (`2026-10-02T15-14-16Z`) ran with a port 8000 instance started without
+`AI_GATEWAY_API_KEY`, so Jev fell back to keywords in both arms, and that run is discarded.
+That is why the probe exists.
+
+| Per session, medians (Sonnet 5) | routed-jev | routed-kw | Opus 5.5 on the same tasks, jev / kw |
+|---|---|---|---|
+| Skill right, first lookup | 12/12 | 9/12 | 12/12 / 9/12 |
+| Expected skill loaded | 12/12 | 12/12 | 12/12 / 12/12 |
+| Task completed (picks excluded) | 12/12 | 11/12 | 12/12 / 12/12 |
+| First-call context tokens | 11,166 | 11,166 | 4,770 / 4,770 |
+| Context tokens, all calls | 441,685 | 530,836 | 262k / 257k |
+| Turns | 10.5 | 13 | 12.5 / 12.5 |
+| HubSpot tool calls (excl. routing) | 7.5 | 9.5 | 10 / 10 |
+| Cost | $0.169 | $0.197 | $0.204 / $0.196 |
+| Cost, all 12 sessions | $2.47 | $2.49 | - |
+| Duration | 46 s | 55 s | 42 s / 37 s |
+| Argument rejections | 0 | 4 | 0 / 4 |
+| Routing latency | 780 ms | 0 | 651 ms / 0 |
+
+The keyword router made the same mistake it made on Opus: `call-prep` first for the log-call
+prompt on all three reps, `log-call` second. Sonnet 5 recovered the same way Opus did, loading
+`log-call` from second place every time, but it paid more for the detour: the keyword arm's
+log-call sessions ran 17 turns and 73 s at median against Jev's 19 turns and 81 s on Opus,
+and on Sonnet the gap flipped the other way across the whole set, with the keyword arm two
+turns longer, 20% more context, 16% more cost and 9 s slower at median. The totals are flat
+($2.47 vs $2.49) because one long Jev daily-brief session (16 turns, $0.43) offsets the
+savings elsewhere. The keyword arm's one task failure was not a routing miss: on one
+follow-up rep the model picked and loaded the right skill, then tried to log the draft to
+HubSpot, hit a malformed association, and never printed the email.
+
+Two things about the model, not the router. Sonnet's first-call context on the same routed
+surface is 11.2k tokens against Opus's 4.8k, which is Claude Code's per-model system prompt,
+not anything the server sends. And Sonnet 5 took the sales skills further than Opus did:
+most log-call sessions on both arms also set the lifecycle stage and created the follow-up
+task, as the skill says, where Opus usually stopped at the note and lead status.
+
+Verdict: on a smaller model the router's picks matter a little more, in the direction the
+hypothesis predicted. With Opus the keyword arm was 6% cheaper per session; with Sonnet 5 the
+Jev arm was 14% cheaper and 16% faster at median, with zero argument rejections against four.
+Twelve sessions per arm is a small sample, and the totals do not separate, so this is a
+direction, not a measurement. Portal clean after the run (no pending previews, no engagements
+left on the test contact, test deal unchanged).
+
 ## Running the bench
 
 See `bench/README.md`. Server in token mode on 127.0.0.1:8000 serving both surfaces; runner
 does 12 tasks x 3 reps x 3 arms (about 108 sessions, ~40 s each), rejecting pending previews
-and undoing AUTO writes between reps; `bench/report.py` writes `report.md`.
+and undoing AUTO writes between reps; `bench/report.py` writes `report.md`. For a router
+comparison, start a second process with `HUBSPOT_MCP_ROUTER=keyword PORT=8001 bench/serve.sh`
+and pass `--arm-url routed-jev=http://127.0.0.1:8000/mcp/routed --arm-url routed-kw=http://127.0.0.1:8001/mcp/routed`.
 
 ## Inputs still needed
 
