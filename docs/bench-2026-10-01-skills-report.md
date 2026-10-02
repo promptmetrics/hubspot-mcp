@@ -1,6 +1,7 @@
 # Bench report: 2026-10-01T10-13-22Z
 
 - Sessions: 24 (4 tasks x 3 reps x 2 arms)
+- Cost basis: Anthropic list API prices for the model that ran (claude-opus-5-5[1m]), as Claude Code reports them (`total_cost_usd`, costBasis list). The sessions ran on a Claude subscription, so the dollar figures are API-equivalent, not money spent.
 - Model: Claude Code default (observed: claude-opus-5-5[1m]); Claude Code 2.1.281 (Claude Code)
 - Server: http://127.0.0.1:8000
 
@@ -33,7 +34,7 @@ Full/routed tools/list ratio: 13.8x by bytes.
 | t16 | full | 3/3 | 18,484 | 339,585 | 279 | $0.1725 | 34,434 | 12 | 11 | hubspot_find_skills, hubspot_load_skill, hubspot_search_objects, hubspot_status, hubspot_list_users, hubspot_list_associ |
 | t16 | routed | 3/3 | 4,774 | 278,108 | 690 | $0.1882 | 43,925 | 20 | 19 | find_capabilities, load_skill, hubspot_search_objects, hubspot_status, hubspot_search_objects, hubspot_list_users, hubsp |
 
-## Routing decisions (routed arm)
+## Routing decisions (routed arms)
 
 | Task | Router | Primary charter | Routing ms | Routing cost | Tools returned |
 |---|---|---|---|---|---|

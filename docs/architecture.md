@@ -407,6 +407,12 @@ Reviewers, please focus on:
   first and routing adds round trips. The routed surface stays experimental; the next step is
   to fold `load_charter` into `find_capabilities` and return fewer schemas, then re-measure on
   a multi-server host where the context headroom matters.
+- **Router measured (2026-10-02):** same surface, Jev vs the keyword fallback, 120 sessions: Jev
+  picked the labelled skill 24/24 against 14/24 and never let a generic charter outrank the specific
+  one; the keyword arm failed 3 tasks outright where the right skill was missing from its list.
+  Jev costs 651 ms and $0.0005 per route and about 6% more per session in cached context on Opus;
+  on Sonnet 5 the Jev arm was 14% cheaper and 16% faster at median because wrong keyword picks
+  cost the smaller model more turns. Jev stays the default, keywords the fallback.
 
 ### D14 — HubSpot's Sales skills served from the server, routed per request, 2026-10-01
 

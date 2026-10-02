@@ -160,7 +160,9 @@ and say so in their response.
 or `hubspot_find_skills` (the user's request in their own words) and the tool and skill
 descriptions, sent to Vercel's AI Gateway and on to TypeSafe. No portal data and no record
 contents. Set `HUBSPOT_MCP_ROUTER=keyword` to keep routing on the server; the keyword router is
-weaker (42% vs 90% on the skill eval) but sends nothing anywhere.
+weaker (42% vs 90% on the skill eval; 14/24 vs 24/24 right skills in live sessions) but sends
+nothing anywhere. The model usually recovers from a wrong pick by reading past it, at the
+price of extra turns; see "Jev vs keyword" in `docs/routed-mode.md`.
 
 Every HTTP request must carry `Authorization: Bearer $HUBSPOT_MCP_SERVER_SECRET`
 — protocol `2026-07-28` has no handshake, so there is no connection to

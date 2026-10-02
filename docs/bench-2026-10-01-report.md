@@ -1,6 +1,7 @@
 # Bench report: 2026-10-01T06-25-37Z
 
 - Sessions: 106 (12 tasks x 3 reps x 3 arms)
+- Cost basis: Anthropic list API prices for the model that ran (claude-opus-5-5[1m]), as Claude Code reports them (`total_cost_usd`, costBasis list). The sessions ran on a Claude subscription, so the dollar figures are API-equivalent, not money spent.
 - Model: Claude Code default (observed: claude-opus-5-5[1m]); Claude Code 2.1.281 (Claude Code)
 - Server: http://127.0.0.1:8000
 
@@ -63,7 +64,7 @@ Full/routed tools/list ratio: 18.7x by bytes.
 | t12 | full | 3/3 | 17,928 | 17,928 | 4 | $0.0216 | 3,952 | 1 | 0 |  |
 | t12 | routed | 3/3 | 4,501 | 13,851 | 123 | $0.0271 | 7,109 | 2 | 1 | find_capabilities |
 
-## Routing decisions (routed arm)
+## Routing decisions (routed arms)
 
 | Task | Router | Primary charter | Routing ms | Routing cost | Tools returned |
 |---|---|---|---|---|---|
