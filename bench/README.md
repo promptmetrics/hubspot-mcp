@@ -38,6 +38,21 @@ HUBSPOT_PORTAL=<portal id> HUBSPOT_MCP_ROUTER=keyword PORT=8001 bench/serve.sh  
   --arm-url routed-kw=http://127.0.0.1:8001/mcp/routed
 ```
 
+Multi-turn reuse: `bench/multiturn.py` runs each scenario in `bench/scenarios.jsonl` as one
+session with several user turns (turn 1 with `--session-id`, later turns with `--resume`, so
+per-turn usage is exact), then the same prompts as single-turn sessions for comparison. It
+reports lookup and load calls per turn, cache reads and writes, and per-turn cost, and deletes
+the transcript Claude Code saved for the session afterwards. `bench/multiturn_report.py` writes
+the report.
+
+```bash
+.venv/bin/python bench/multiturn.py --smoke --arm-url routed-jev=http://127.0.0.1:8000/mcp/routed --test-contact "..." --test-deal "..."
+.venv/bin/python bench/multiturn.py --reps 3 --single-reps 2 \
+  --arm-url routed-jev=http://127.0.0.1:8000/mcp/routed --arm-url full=http://127.0.0.1:8000/mcp \
+  --test-contact "..." --test-deal "..."
+.venv/bin/python bench/multiturn_report.py bench/runs/<stamp>-multiturn
+```
+
 `--model sonnet` runs the sessions on another Claude Code model alias; the report records the
 model id actually observed (the `sonnet` alias resolved to `claude-sonnet-5` on 2.1.281).
 `--only t13,t14` limits the task set.
@@ -55,6 +70,7 @@ placeholders only; grep it for real names before it leaves the machine.
 - `charter_eval.py`: Jev vs keyword on the 49-prompt charter routing corpus (`tests/routing_corpus.yaml`).
 - `rescore.py`: re-applies the checks to an existing run after a check changes.
 - `serve.sh`: restart loop for the local server; `PORT` and `HUBSPOT_MCP_ROUTER` select the instance.
+- `scenarios.jsonl`, `multiturn.py`, `multiturn_report.py`: multi-turn sessions (one skill, several user turns) and their report.
 
 ## Gotchas
 
