@@ -119,7 +119,7 @@ def audit_deal(props: dict[str, Any], stage: Stage | None, rules: SalesRules, as
     """
     tz = rules.timezone
     label = stage.label if stage else None
-    category = common.normalize_category(props.get("hs_forecast_category"))
+    category = common.normalize_category(props.get("hs_manual_forecast_category"))
     fired: dict[str, dict[str, str]] = {}
 
     close = common.to_date(props.get("closedate"))
@@ -360,7 +360,7 @@ def compute_forecast(
         return Row(
             record=deal,
             id=deal["id"],
-            category=common.normalize_category(props.get("hs_forecast_category")),
+            category=common.normalize_category(props.get("hs_manual_forecast_category")),
             close=common.to_date(props.get("closedate")),
             amount=_dec(props.get("amount")),
             currency=(props.get("deal_currency_code") or "").upper() or home,

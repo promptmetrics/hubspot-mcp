@@ -121,7 +121,7 @@ def http() -> SearchableHubSpot:
         fake.link(("contacts", cid), ("companies", "10"))
     fake.add(
         "deals", "100", dealname="Globex - Renewal", amount="50000", deal_currency_code="EUR", closedate="2026-11-30",
-        dealstage="s2", pipeline="p1", hubspot_owner_id="7", hs_forecast_category="COMMIT",
+        dealstage="s2", pipeline="p1", hubspot_owner_id="7", hs_manual_forecast_category="COMMIT",
     )
     fake.link(("deals", "100"), ("companies", "11"))
     fake.link(("deals", "100"), ("contacts", "4"))

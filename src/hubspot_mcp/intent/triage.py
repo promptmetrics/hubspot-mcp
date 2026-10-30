@@ -33,7 +33,7 @@ from hubspot_mcp.intent.rules import SalesRules
 
 # Report order inside one deal's reasons, most urgent first.
 _CODE_ORDER = ("OVERDUE", "SILENT", "NO_NEXT", "STALLED")
-DEFAULT_LIMIT = 30
+DEFAULT_LIMIT = 50
 MAX_LIMIT = 200
 
 
@@ -46,7 +46,7 @@ def evaluate_deal(
 ) -> list[dict[str, str]]:
     """Reason codes that fire for one open deal. Empty means the deal is clean."""
     tz = rules.timezone
-    category = common.normalize_category(props.get("hs_forecast_category"))
+    category = common.normalize_category(props.get("hs_manual_forecast_category"))
     fired: dict[str, dict[str, str]] = {}
 
     # closedate is midnight UTC of the picked day, so it reads as a UTC date.

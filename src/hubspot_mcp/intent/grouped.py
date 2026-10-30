@@ -421,7 +421,7 @@ TOOLS: list[tuple[str, object, str]] = common.guard_tools(
             "deals",
             deals,
             "Read deals. With id, fetches that deal; without, searches by filters, free-text query and sort."
-            " Use properties to choose the fields (amount, closedate, dealstage, hubspot_owner_id, hs_forecast_category)."
+            " Use properties to choose the fields (amount, closedate, dealstage, hubspot_owner_id, hs_manual_forecast_category)."
             + _READ_NOTE,
         ),
         (

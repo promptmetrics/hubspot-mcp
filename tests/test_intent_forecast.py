@@ -71,7 +71,7 @@ def deal(deal_id: str, amount: str, currency: str = "EUR", home: str | None = No
         "amount_in_home_currency": home if home is not None else (amount if currency == "EUR" else None),
         "closedate": "2026-11-20T00:00:00Z",
         "hubspot_owner_id": "11",
-        "hs_forecast_category": "COMMIT",
+        "hs_manual_forecast_category": "COMMIT",
         "notes_last_contacted": "2026-10-25T10:00:00Z",
         "notes_next_activity_date": "2026-11-05T09:00:00Z",
         "hs_date_entered_current_stage": "2026-10-10T10:00:00Z",
@@ -84,7 +84,7 @@ def won(deal_id: str, amount: str, close: str, currency: str = "EUR", home: str 
     return deal(
         deal_id, amount, currency, home,
         dealstage="s4", hs_is_closed="true", hs_is_closed_won="true", closedate=f"{close}T00:00:00Z",
-        hs_forecast_category="CLOSED",
+        hs_manual_forecast_category="CLOSED",
     )
 
 
@@ -99,13 +99,13 @@ WORLD = [
     deal("103", "40000", dealstage="s1", hs_deal_stage_probability="0.2"),
     deal("104", "20000", notes_last_contacted="2026-09-30T10:00:00Z"),
     deal("105", "15000", closedate="2026-10-15T00:00:00Z"),
-    deal("106", "10000", "USD", "9200.10", hs_forecast_category="BEST_CASE"),
-    deal("107", "8000", hs_forecast_category="BEST_CASE", notes_next_activity_date=None, hs_next_step=""),
-    deal("108", "25000", dealstage="s3", hs_forecast_category="PIPELINE"),
-    deal("109", "12000", "USD", "11040", dealstage="s1", hs_forecast_category="PIPELINE",
+    deal("106", "10000", "USD", "9200.10", hs_manual_forecast_category="BEST_CASE"),
+    deal("107", "8000", hs_manual_forecast_category="BEST_CASE", notes_next_activity_date=None, hs_next_step=""),
+    deal("108", "25000", dealstage="s3", hs_manual_forecast_category="PIPELINE"),
+    deal("109", "12000", "USD", "11040", dealstage="s1", hs_manual_forecast_category="PIPELINE",
          hs_date_entered_current_stage="2026-08-01T10:00:00Z"),
-    deal("110", "99999", hs_forecast_category="OMIT"),
-    deal("111", "1000", "GBP", dealstage="s1", hs_forecast_category="PIPELINE"),
+    deal("110", "99999", hs_manual_forecast_category="OMIT"),
+    deal("111", "1000", "GBP", dealstage="s1", hs_manual_forecast_category="PIPELINE"),
     deal("301", "7000", closedate="2026-09-15T00:00:00Z"),
     deal("302", "3000", closedate="2027-02-01T00:00:00Z"),
     deal("303", "2000", "USD", "1840.40", closedate=None),
@@ -192,8 +192,8 @@ def test_a_rules_override_beats_the_deals_own_probability():
 def test_when_every_probability_is_zero_or_one_weighted_is_the_open_deal_value():
     deals = [
         deal("1", "1000", hs_forecast_probability="1"),
-        deal("2", "500.50", hs_forecast_category="PIPELINE", hs_forecast_probability="0"),
-        deal("3", "9999", hs_forecast_category="OMIT", hs_forecast_probability="0.5"),
+        deal("2", "500.50", hs_manual_forecast_category="PIPELINE", hs_forecast_probability="0"),
+        deal("3", "9999", hs_manual_forecast_category="OMIT", hs_forecast_probability="0.5"),
     ]
     fc = run(deals)
     assert fc.probability_mode == "unweighted"
@@ -236,8 +236,8 @@ def test_supported_commit_drops_the_whole_amount_of_each_flagged_commit_deal():
 def test_flagged_best_case_and_pipeline_deals_do_not_touch_supported_commit():
     only = [
         deal("1", "1000"),
-        deal("2", "700", hs_forecast_category="BEST_CASE", notes_next_activity_date=None),
-        deal("3", "300", hs_forecast_category="PIPELINE", dealstage="s3"),
+        deal("2", "700", hs_manual_forecast_category="BEST_CASE", notes_next_activity_date=None),
+        deal("3", "300", hs_manual_forecast_category="PIPELINE", dealstage="s3"),
     ]
     fc = run(only)
     assert fc.findings["NO_NEXT"] == 1 and fc.findings["SANDBAG"] == 1
@@ -268,14 +268,14 @@ def test_inflated_reads_the_stage_probability_not_the_deals_own_forecast_probabi
 def test_inflated_and_sandbag_boundaries_are_strict():
     assert codes({"hs_deal_stage_probability": "0.4"}) == []
     assert codes({"hs_deal_stage_probability": "0.39"}) == ["INFLATED"]
-    assert codes({"hs_forecast_category": "PIPELINE", "hs_deal_stage_probability": "0.8"}) == []
-    assert codes({"hs_forecast_category": "PIPELINE", "hs_deal_stage_probability": "0.81"}) == ["SANDBAG"]
+    assert codes({"hs_manual_forecast_category": "PIPELINE", "hs_deal_stage_probability": "0.8"}) == []
+    assert codes({"hs_manual_forecast_category": "PIPELINE", "hs_deal_stage_probability": "0.81"}) == ["SANDBAG"]
 
 
 def test_inflated_and_sandbag_use_the_thresholds_from_the_rules():
     tight = rules(inflated_below=0.7, sandbag_above=0.5)
     assert codes({}, sales_rules=tight) == ["INFLATED"]
-    assert codes({"hs_forecast_category": "PIPELINE"}, sales_rules=tight) == ["SANDBAG"]
+    assert codes({"hs_manual_forecast_category": "PIPELINE"}, sales_rules=tight) == ["SANDBAG"]
 
 
 def test_a_rules_probability_override_changes_inflated():
@@ -301,7 +301,7 @@ def test_stalled_uses_the_per_stage_limit_from_the_rules():
 
 
 def test_silent_and_no_next_apply_only_to_the_rules_scope():
-    props = {"hs_forecast_category": "PIPELINE", "notes_last_contacted": "2026-08-01T10:00:00Z", "notes_next_activity_date": None}
+    props = {"hs_manual_forecast_category": "PIPELINE", "notes_last_contacted": "2026-08-01T10:00:00Z", "notes_next_activity_date": None}
     assert codes(props) == []
     wide = rules(silent_scope=["COMMIT", "BEST_CASE", "PIPELINE"], no_next_scope=["PIPELINE"])
     assert codes(props, sales_rules=wide) == ["SILENT", "NO_NEXT"]
@@ -348,7 +348,7 @@ def test_closed_lost_and_closed_won_outside_the_period_are_ignored():
 
 
 def test_an_omit_deal_is_in_no_figure():
-    fc = run([deal("1", "1000"), deal("2", "50000", hs_forecast_category="OMIT")])
+    fc = run([deal("1", "1000"), deal("2", "50000", hs_manual_forecast_category="OMIT")])
     assert fc.figures["pipeline"] == fc.figures["commit"] == 1000.00
     assert fc.counts["open_in_period"] == 2 and fc.counts["pipeline_counted"] == 1
 
@@ -728,7 +728,7 @@ async def test_concise_caps_the_deal_lists_and_detailed_returns_everything_with_
     from hubspot_mcp import server
 
     many = [
-        deal(str(1000 + i), "100", hs_forecast_category="BEST_CASE", notes_next_activity_date=None) for i in range(14)
+        deal(str(1000 + i), "100", hs_manual_forecast_category="BEST_CASE", notes_next_activity_date=None) for i in range(14)
     ]
     script_world(http, many, [])
     concise = _data(await forecast_call(server))

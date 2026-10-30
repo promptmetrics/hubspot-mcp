@@ -73,7 +73,7 @@ DEAL_PROPERTIES: tuple[str, ...] = (
     "dealstage",
     "pipeline",
     "hubspot_owner_id",
-    "hs_forecast_category",
+    "hs_manual_forecast_category",
     "hs_forecast_probability",
     "hs_deal_stage_probability",
     "hs_is_closed",
@@ -881,7 +881,7 @@ def deal_line(
         "amount_home": amount_home(props, dctx.rules),
         "close_date": close.isoformat() if close else None,
         "owner": dctx.owners.display(props.get("hubspot_owner_id")),
-        "forecast_category": normalize_category(props.get("hs_forecast_category")),
+        "forecast_category": normalize_category(props.get("hs_manual_forecast_category")),
         "url": record_url(dctx.portal_id, "deals", deal_id, dctx.region),
     }
     if reasons is not None:

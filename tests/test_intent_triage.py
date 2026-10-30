@@ -114,7 +114,7 @@ def deal(deal_id: str, **props: Any) -> dict[str, Any]:
         "amount_in_home_currency": "1000",
         "closedate": "2026-11-20T00:00:00Z",
         "hubspot_owner_id": "11",
-        "hs_forecast_category": "COMMIT",
+        "hs_manual_forecast_category": "COMMIT",
         "notes_last_contacted": "2026-10-28T10:00:00Z",
         "notes_next_activity_date": "2026-11-05T09:00:00Z",
         "hs_date_entered_current_stage": "2026-10-20T10:00:00Z",
@@ -178,19 +178,19 @@ def test_silent_detail_names_the_days_and_the_limit():
 
 def test_silent_and_no_next_apply_only_to_commit_and_best_case():
     stale = {"notes_last_contacted": "2026-08-01T00:00:00Z", "notes_next_activity_date": None}
-    assert codes({**stale, "hs_forecast_category": "COMMIT"}) == ["SILENT", "NO_NEXT"]
-    assert codes({**stale, "hs_forecast_category": "BEST_CASE"}) == ["SILENT", "NO_NEXT"]
-    assert codes({**stale, "hs_forecast_category": "PIPELINE"}) == []
-    assert codes({**stale, "hs_forecast_category": None}) == []
+    assert codes({**stale, "hs_manual_forecast_category": "COMMIT"}) == ["SILENT", "NO_NEXT"]
+    assert codes({**stale, "hs_manual_forecast_category": "BEST_CASE"}) == ["SILENT", "NO_NEXT"]
+    assert codes({**stale, "hs_manual_forecast_category": "PIPELINE"}) == []
+    assert codes({**stale, "hs_manual_forecast_category": None}) == []
 
 
 def test_the_scope_comes_from_the_rules_file():
-    stale = {"notes_last_contacted": "2026-08-01T00:00:00Z", "hs_forecast_category": "PIPELINE"}
+    stale = {"notes_last_contacted": "2026-08-01T00:00:00Z", "hs_manual_forecast_category": "PIPELINE"}
     assert codes(stale, SalesRules(silent_scope=["PIPELINE"])) == ["SILENT"]
 
 
 def test_a_human_readable_category_label_is_matched_too():
-    stale = {"notes_last_contacted": "2026-08-01T00:00:00Z", "hs_forecast_category": "Best case"}
+    stale = {"notes_last_contacted": "2026-08-01T00:00:00Z", "hs_manual_forecast_category": "Best case"}
     assert codes(stale) == ["SILENT"]
 
 

@@ -544,7 +544,7 @@ async def test_deal_line_has_the_compact_fields_every_job_returns(lf, http):
             amount_in_home_currency="44160",
             closedate="2026-11-15T00:00:00Z",
             hubspot_owner_id="3",
-            hs_forecast_category="BEST_CASE",
+            hs_manual_forecast_category="BEST_CASE",
         ),
         dctx,
     )

@@ -94,7 +94,7 @@ def _seed(http: BriefFake) -> None:
 
     http.add("deals", "301", dealname="Acme renewal", dealstage="s2", pipeline="p1", amount="24000",
              deal_currency_code="EUR", closedate="2026-12-15T00:00:00Z", hs_is_closed="false", hubspot_owner_id="9",
-             hs_forecast_category="COMMIT")
+             hs_manual_forecast_category="COMMIT")
     http.add("deals", "302", dealname="Acme 2025 license", dealstage="s3", pipeline="p1", amount="9000",
              closedate="2025-12-01T00:00:00Z", hs_is_closed="true")
     http.add("deals", "303", dealname="Globex pilot", dealstage="s1", pipeline="p1", amount="5000",
