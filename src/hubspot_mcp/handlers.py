@@ -761,7 +761,9 @@ async def handle_reject(client, cache, portal_config: PortalConfig, params: dict
         raise HandlerError("validation", "Missing 'action_id' in params.")
     portal_id = portal_config.portal_id
     preview_data = await get_store().load_pending(portal_id, action_id)
-    if preview_data is None:
+    # Intent changesets share the pending store but belong to the pronova_*
+    # tools; this gate must not discard one the user may still approve there.
+    if preview_data is None or preview_data.get("kind") == "intent_changeset":
         raise HandlerError("not_found", f"No pending preview found with ID {action_id}.")
     who = preview_data.get("agent_name") or preview_data.get("tool_name") or "tool"
     await get_store().clear_pending(portal_id, action_id)

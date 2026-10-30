@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 
 from hubspot_mcp.config import load_portal_config
@@ -17,8 +18,12 @@ from hubspot_mcp.config import load_portal_config
 def _cmd_server(args: argparse.Namespace) -> int:
     from hubspot_mcp import server
 
+    surface = getattr(args, "surface", None) or os.getenv("HUBSPOT_MCP_SURFACE") or "full"
+    if surface not in server.SURFACES:
+        print(f"error: unknown surface {surface!r}; choose one of {', '.join(server.SURFACES)}", file=sys.stderr)
+        return 2
     server.configure_server(portal_id=args.portal, mode=args.mode)
-    server.run(transport=args.transport, host=args.host, port=args.port)
+    server.run(transport=args.transport, host=args.host, port=args.port, surface=surface)
     return 0
 
 
@@ -84,10 +89,17 @@ def _cmd_auth_scopes(args: argparse.Namespace) -> int:
     return 0
 
 
+_SURFACE_HELP = (
+    "Tool set for stdio: full (all tools, default), routed, intent (pronova_* job tools) "
+    "or grouped. Or set HUBSPOT_MCP_SURFACE. HTTP serves all of them at their own paths."
+)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="hubspot-mcp", description="HubSpot MCP server")
     p.add_argument("--portal", help="HubSpot portal ID (or set HUBSPOT_PORTAL)")
     p.add_argument("--mode", choices=("oauth", "token"), default="oauth", help="Auth mode (default: oauth)")
+    p.add_argument("--surface", default=None, help=_SURFACE_HELP)
 
     sub = p.add_subparsers(dest="command")
 
@@ -98,6 +110,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default="stdio",
         help="stdio (default) or streamable-http; 'http' is an alias for streamable-http",
     )
+    # SUPPRESS keeps an unset `run --surface` from erasing a root-level one.
+    run_p.add_argument("--surface", default=argparse.SUPPRESS, help=_SURFACE_HELP)
     run_p.add_argument("--host", default=None)
     run_p.add_argument("--port", type=int, default=None)
     run_p.set_defaults(func=_cmd_server)

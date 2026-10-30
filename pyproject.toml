@@ -21,6 +21,9 @@ dependencies = [
     "redis>=6,<9",
     "cryptography>=42,<50",
     "pyjwt[crypto]>=2.10,<3",
+    # Sales rules for the intent tools (intent/rules/*.yaml) are read at runtime,
+    # so this is a runtime dependency, not a dev one.
+    "pyyaml>=6.0,<7",
 ]
 
 [project.urls]
@@ -38,7 +41,6 @@ dev = [
     "pytest-httpx>=0.36,<0.37",
     "respx>=0.23,<0.24",
     "hypothesis>=6.0,<7",
-    "pyyaml>=6.0,<7",
     # Pinned to a minor: a lint gate that changes rule set on a dependency
     # release fails CI on unrelated PRs, which trains people to ignore it.
     "ruff>=0.16.5,<0.17",
