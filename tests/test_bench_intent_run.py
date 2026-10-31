@@ -1081,3 +1081,64 @@ def test_a_search_index_that_never_catches_up_is_upstream_stale_state_and_claude
     assert rec["failure_class"] == "upstream"
     assert rec["failure_detail"].startswith("stale_state: search index")
     assert claude.calls == []
+
+
+@pytest.mark.parametrize("task_id", ["job3", "job5", "off_globex"])
+def test_not_done_entries_may_be_text_or_objects_since_only_emptiness_is_graded(task_id):
+    # Smoke runs saw five sessions write {"item": ..., "reason": ...}; a strict string schema failed the whole answer.
+    schema = JOB[task_id]["answer_schema"]
+    for not_done in (["none"], [{"item": "Move deal", "reason": "no access"}], []):
+        answer = {**json.loads(JOB[task_id]["answer_example"]), "not_done": not_done}
+        assert ir.validate_schema(answer, schema) is None
+
+
+# --- resume and stop-before -------------------------------------------------------------------------------------------
+
+
+def _keys(rows):
+    return [(r["rep"], r["task_id"], r["arm"], r["model"]) for r in rows]
+
+
+def test_a_resumed_run_finishes_exactly_the_missing_sessions_after_a_crash_mid_write(tmp_path, monkeypatch, capsys):
+    code, out = run_main(tmp_path, monkeypatch)
+    assert code == 0
+    full = (out / "sessions.jsonl").read_text().splitlines()
+    assert len(full) == 49
+    # The machine died after session 20, halfway through writing session 21.
+    (out / "sessions.jsonl").write_text("\n".join(full[:20]) + "\n" + full[20][: len(full[20]) // 2], encoding="utf-8")
+    truth = tmp_path / "truth.json"
+    code = ir.main(["--truth", str(truth), "--dry-run", "--resume", str(out)])
+    assert code == 0
+    assert "resume: 20 session(s) already finished" in capsys.readouterr().out
+    rows = ir.read_sessions(out / "sessions.jsonl")
+    assert len(rows) == 49 and len(set(_keys(rows))) == 49
+    assert [r["n"] for r in rows] == list(range(1, 50))
+    meta = json.loads((out / "meta.json").read_text())
+    assert len(meta["resumes"]) == 1 and meta["resumes"][0]["sessions_done"] == 20
+    assert (out / "sessions.jsonl.partial").read_text() == full[20][: len(full[20]) // 2] + "\n"
+
+
+def test_a_resume_with_different_settings_is_refused(tmp_path, monkeypatch, capsys):
+    code, out = run_main(tmp_path, monkeypatch, "--only", "job1")
+    assert code == 0
+    truth = tmp_path / "truth.json"
+    assert ir.main(["--truth", str(truth), "--dry-run", "--resume", str(out), "--only", "job1,job2"]) == 2
+    assert "different tasks" in capsys.readouterr().out
+    assert ir.main(["--truth", str(truth), "--dry-run", "--resume", str(tmp_path / "nowhere")]) == 2
+
+
+def test_stop_before_exits_5_without_starting_a_session_and_the_run_resumes(tmp_path, monkeypatch, capsys):
+    code, out = run_main(tmp_path, monkeypatch, "--only", "job1", "--stop-before", "2000-01-01T00:00:00Z")
+    assert code == 5 and "--resume" in capsys.readouterr().out
+    assert ir.read_sessions(out / "sessions.jsonl") == []
+    truth = tmp_path / "truth.json"
+    assert ir.main(["--truth", str(truth), "--dry-run", "--resume", str(out), "--only", "job1"]) == 0
+    assert len(ir.read_sessions(out / "sessions.jsonl")) == 7
+
+
+def test_a_lone_upstream_attempt_is_run_again_but_a_rerun_one_is_done():
+    base = {"rep": 1, "task_id": "job1", "arm": "A", "model": "sonnet"}
+    assert ir.completed_keys([{**base, "failure_class": "upstream", "attempt": 1}]) == set()
+    assert ir.completed_keys([{**base, "failure_class": "upstream", "attempt": 1},
+                              {**base, "failure_class": "upstream", "attempt": 2}]) == {(1, "job1", "A", "sonnet")}
+    assert ir.completed_keys([{**base, "failure_class": "model", "attempt": 1}]) == {(1, "job1", "A", "sonnet")}

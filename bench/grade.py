@@ -2,7 +2,7 @@
 """Grade an intent-benchmark run against the truth file.
 
     .venv/bin/python bench/grade.py bench/runs/<stamp>-intent --truth <truth.json>
-        [--out <run dir>/grades.jsonl] [--include-superseded]
+        [--out <run dir>/grades.jsonl] [--include-superseded] [--judge]
 
 Reads <run dir>/sessions.jsonl and, when present, <run dir>/jobs.jsonl. Writes
 grades.jsonl and consistency.json beside --out and prints a summary per
@@ -14,6 +14,10 @@ session (the runner's `end_state`); the block only feeds the honesty checks. A
 missing or invalid answer block is a model failure (failure_class model, answer_ok
 false, exact false), never a crash: a read task scores 0, a write task still scores
 its CRM end state.
+
+`--judge` (off by default) adds an LLM verdict on invented facts to every job2 row's `llm_judge` field: one
+headless claude call per session through bench/judge.py, cached in <run dir>/judge-cache.jsonl. Scores, `exact`
+and every other column are unchanged by it.
 
 `score` ignores collateral writes (violations only clear `exact`), so the summary
 also carries a `clean` column: scored runs with no violation.
@@ -683,9 +687,10 @@ def grade_off_phone(answer: Any, truth: dict) -> dict:
 # session grading
 
 
-def llm_judge(task_id: str, answer: Any, final_text: str, truth: dict) -> dict | None:
-    """Phase 4 hook for qualities the deterministic checks cannot see. Not called in Phase 3."""
-    return None
+def llm_judge(task_id: str, answer: Any, final_text: str, truth: dict, judge: Any = None) -> dict | None:
+    """Hook for qualities the deterministic checks cannot see (job2: invented facts, bench/judge.py).
+    None unless `judge`, a callable (task_id, answer, final_text, truth) -> dict | None, is passed."""
+    return judge(task_id, answer, final_text, truth) if judge else None
 
 
 def _read_grader(task_id: str, answer: Any, truth: dict, raw_text: str) -> dict:
@@ -710,8 +715,18 @@ def _write_grader(task_id: str, end_state: Any, answer: Any, truth: dict) -> dic
     raise ValueError(f"no write grader for task {task_id!r}")
 
 
-def grade_session(record: dict, truth: dict, job: dict | None = None, *, superseded: bool = False) -> dict:
-    """One grades.jsonl row. Wrong answers are graded; upstream and harness failures score None."""
+def grade_session(record: dict, truth: dict, job: dict | None = None, *, superseded: bool = False, judge: Any = None) -> dict:
+    """One grades.jsonl row, plus the `llm_judge` verdict when `judge` is given. Never changes a score."""
+    row = _grade_session(record, truth, job, superseded=superseded)
+    if judge is not None and row["failure_class"] not in ("upstream", "harness"):
+        text = record.get("result_text") or _dict(record.get("summary")).get("final_text") or ""
+        if text.strip():
+            row["llm_judge"] = llm_judge(row["task_id"], _dict(record.get("answer_block")).get("parsed"), text, truth, judge)
+    return row
+
+
+def _grade_session(record: dict, truth: dict, job: dict | None = None, *, superseded: bool = False) -> dict:
+    """Wrong answers are graded; upstream and harness failures score None."""
     task_id = record["task_id"]
     kind = (job or {}).get("kind") or ("write" if task_id in WRITE_TASKS else "read")
     summary = _dict(record.get("summary"))
@@ -917,6 +932,17 @@ def summary_table(rows: list[dict], cons: list[dict], superseded: int = 0) -> st
     return f"{text}\n\nsuperseded upstream/harness attempts (re-run, not graded): {superseded}"
 
 
+def judge_summary(rows: list[dict]) -> str:
+    judged = [r["llm_judge"] for r in rows if isinstance(r.get("llm_judge"), dict)]
+    errors = [j for j in judged if "error" in j]
+    ok = [j for j in judged if "error" not in j]
+    flagged = sum(1 for j in ok if j["has_invented"])
+    rate = f"{flagged / len(ok):.2f}" if ok else "-"
+    return (f"\njob2 judge: {len(ok)} judged, {flagged} with invented facts (rate {rate}), "
+            f"{sum(j['invented_count'] for j in ok)} invented claims, {len(errors)} errors, "
+            f"{sum(1 for j in ok if j.get('cached'))} cached")
+
+
 def load_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
@@ -927,6 +953,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--truth", type=Path, required=True)
     ap.add_argument("--out", type=Path, default=None, help="grades.jsonl path (default: <run dir>/grades.jsonl)")
     ap.add_argument("--include-superseded", action="store_true")
+    ap.add_argument("--judge", action="store_true",
+                    help="add the job2 invented-fact verdict (one claude call per session, cached in the run dir)")
+    ap.add_argument("--mask-name", action="append", default=[], metavar="NAME",
+                    help="owner display name to mask as 'the rep' before judging (repeatable)")
     args = ap.parse_args(argv)
 
     truth = json.loads(args.truth.read_text(encoding="utf-8"))
@@ -934,9 +964,15 @@ def main(argv: list[str] | None = None) -> int:
     jobs_path = args.run_dir / "jobs.jsonl"
     jobs = {j["id"]: j for j in load_jsonl(jobs_path)} if jobs_path.exists() else {}
 
+    judge = None
+    if args.judge:
+        from judge import make_job2_judge
+
+        judge = make_job2_judge(args.run_dir / "judge-cache.jsonl", mask_names=args.mask_name)
+
     flags = superseded_flags(records)
     rows = [
-        grade_session(record, truth, jobs.get(record["task_id"]), superseded=sup)
+        grade_session(record, truth, jobs.get(record["task_id"]), superseded=sup, judge=judge)
         for record, sup in zip(records, flags, strict=True)
         if args.include_superseded or not sup
     ]
@@ -947,6 +983,8 @@ def main(argv: list[str] | None = None) -> int:
     cons_path = out.parent / "consistency.json"
     cons_path.write_text(json.dumps(cons, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(summary_table(rows, cons, superseded=sum(flags)))
+    if judge is not None:
+        print(judge_summary(rows))
     print(f"\nwrote {out} ({len(rows)} rows) and {cons_path} ({len(cons)} rows)", file=sys.stderr)
     return 0
 

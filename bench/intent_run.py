@@ -724,6 +724,51 @@ def run_with_rerun(task, cell, rep, ctx: Ctx, counter: list[int], *, claude_fn, 
     return True
 
 
+RESUME_MUST_MATCH = ("tasks", "cells", "reps", "truth_sha256", "jobs_sha256", "rules_hash", "portal", "arm_d_tier")
+
+
+def read_sessions(path: Path) -> list[dict[str, Any]]:
+    """Every complete line of sessions.jsonl; a line cut short by a crash mid-write is ignored."""
+    out: list[dict[str, Any]] = []
+    if not path.is_file():
+        return out
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
+def repair_cut_line(path: Path) -> None:
+    """A crash mid-write leaves a last line with no newline; appending to it would fuse the next record onto it and
+    lose both. Move the cut text to <name>.partial and end the file on its last complete line."""
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8")
+    if not text or text.endswith("\n"):
+        return
+    head, _, cut = text.rpartition("\n")
+    with path.with_name(path.name + ".partial").open("a", encoding="utf-8") as fh:
+        fh.write(cut + "\n")
+    path.write_text(head + "\n" if head else "", encoding="utf-8")
+
+
+def completed_keys(records: list[dict[str, Any]]) -> set[tuple[int, str, str, str]]:
+    """(rep, task, arm, model) of every session a resume must not run again: one with a non-upstream outcome, or an
+    upstream failure that already had its re-run. A lone upstream first attempt (the run stopped before the re-run)
+    counts as not done, so the session runs again."""
+    done: set[tuple[int, str, str, str]] = set()
+    for r in records:
+        if r.get("failure_class") != "upstream" or r.get("attempt", 1) >= 2:
+            done.add((r["rep"], r["task_id"], r["arm"], r["model"]))
+    return done
+
+
+def resume_mismatch(old: dict[str, Any], new: dict[str, Any]) -> list[str]:
+    return [k for k in RESUME_MUST_MATCH if old.get(k) != new.get(k)]
+
+
 def rotated(cells: list[tuple[str, str]], rep: int) -> list[tuple[str, str]]:
     k = rep % len(cells)
     return cells[k:] + cells[:k]
@@ -956,6 +1001,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--index-wait", type=float, default=300.0,
                     help="seconds to wait, before each session, for the Search API to show the restored records")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--resume", default=None, metavar="RUN_DIR",
+                    help="continue a stopped run in RUN_DIR: same tasks, cells, reps, truth, jobs and rules; "
+                         "finished sessions are skipped")
+    ap.add_argument("--stop-before", default=None, metavar="ISO_UTC",
+                    help="start no session at or after this UTC time (e.g. 2026-11-11T08:30:00Z); exit 5, "
+                         "resumable")
     ap.add_argument("--secret-env", default="HUBSPOT_MCP_SERVER_SECRET")
     ap.add_argument("--token-env", default="HUBSPOT_TOKEN_149614891")
     ap.add_argument("--restore-cmd", default=None)
@@ -1070,8 +1121,11 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
-    out = Path(args.out) if args.out else (Path(tempfile.mkdtemp(prefix="hs-intent-dry-")) if args.dry_run
-                                           else HERE / "runs" / f"{stamp}-intent")
+    if args.resume and not (Path(args.resume) / "meta.json").is_file():
+        print(f"abort: --resume {args.resume} has no meta.json")
+        return 2
+    out = Path(args.resume or args.out) if (args.resume or args.out) else (
+        Path(tempfile.mkdtemp(prefix="hs-intent-dry-")) if args.dry_run else HERE / "runs" / f"{stamp}-intent")
     out.mkdir(parents=True, exist_ok=True)
     shutil.copy(jobs_path, out / "jobs.jsonl")
     secret = os.environ.get(args.secret_env) or None
@@ -1104,6 +1158,21 @@ def main(argv: list[str] | None = None) -> int:
         "tool_search_env": base_env.get("ENABLE_TOOL_SEARCH"), "restore_cmd": None if args.no_restore else restore_cmd,
         "timeout": args.timeout, "dry_run": args.dry_run, "no_restore": args.no_restore,
     }
+    previous: dict[str, Any] | None = None
+    if args.resume:
+        previous = json.loads((out / "meta.json").read_text(encoding="utf-8"))
+        if bad := resume_mismatch(previous, meta):
+            print(f"abort: --resume {out} was started with different {', '.join(bad)}; start a new run instead")
+            return 2
+    stop_before = None
+    if args.stop_before:
+        try:
+            stop_before = datetime.fromisoformat(args.stop_before.replace("Z", "+00:00"))
+        except ValueError:
+            print(f"abort: --stop-before {args.stop_before!r} is not an ISO time")
+            return 2
+        if stop_before.tzinfo is None:
+            stop_before = stop_before.replace(tzinfo=UTC)
     print_plan(args, tasks, cells, reps, expected)
     if any(a == "D" for a, _ in cells):
         checked = ("verified against the running server" if d_force_observed is not None
@@ -1135,14 +1204,32 @@ def main(argv: list[str] | None = None) -> int:
                 if not first["ok"]:
                     print(f"abort: the pre-flight restore failed twice (exit {first['exit_code']})")
                     return 2
-            (out / "baseline.json").write_text(json.dumps(reader.baseline(), indent=1), encoding="utf-8")
+            if previous is not None and (out / "baseline.json").is_file():
+                reader.load_baseline(json.loads((out / "baseline.json").read_text(encoding="utf-8")))
+                state = reader.verify_baseline()
+                if not state["ok"]:
+                    print(f"abort: after the restore {len(state['differs'])} seeded record(s) differ from this run's "
+                          "baseline; the portal was re-seeded or changed, so the run cannot be resumed")
+                    return 2
+            else:
+                (out / "baseline.json").write_text(json.dumps(reader.baseline(), indent=1), encoding="utf-8")
         except ReadError as exc:
             print(f"abort: baseline read failed: {exc}")
             return 2
         claude_for = lambda task: run_claude  # noqa: E731
 
-    (out / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     sessions_path = out / "sessions.jsonl"
+    repair_cut_line(sessions_path)
+    earlier = read_sessions(sessions_path)
+    done = completed_keys(earlier)
+    if previous is not None:
+        resumes = previous.get("resumes", [])
+        resumes.append({"at": stamp, "argv": meta["argv"], "claude_version": claude_version,
+                        "hubspot_cli_version": hubspot_version, "sessions_done": len(done),
+                        "records_before": len(earlier)})
+        meta = dict(previous, resumes=resumes)
+        print(f"resume: {len(done)} session(s) already finished in {out}; continuing")
+    (out / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
     def sink(record: dict[str, Any]) -> None:
         with sessions_path.open("a", encoding="utf-8") as fh:
@@ -1153,8 +1240,13 @@ def main(argv: list[str] | None = None) -> int:
               f"{record['failure_class'] or 'ok'}{detail} turns={summary.get('num_turns')} "
               f"cost={summary.get('total_cost_usd')} ms={record['wall_ms']}", flush=True)
 
-    counter = [0]
+    counter = [max((r.get("n", 0) for r in earlier), default=0)]
     for rep, task, cell in session_plan(tasks, cells, reps):
+        if (rep, task["id"], cell[0], cell[1]) in done:
+            continue
+        if stop_before is not None and datetime.now(UTC) >= stop_before:
+            print(f"stop: --stop-before {args.stop_before} reached; resume with --resume {out} (exit 5)")
+            return 5
         try:
             if not run_with_rerun(task, cell, rep, ctx, counter, claude_fn=claude_for(task), reader=reader,
                                   restore_fn=restore_fn, sink=sink):

@@ -216,6 +216,192 @@ least 60 percent of it; job5's "confirm timing" check looks for the words in the
 a write task whose answer block is missing or unparsable still scores its CRM end state, and counts as a `model`
 failure (`model_fail` column, `answer_ok` false, `details.block_missing`).
 
+### Report and verdict (`bench/intent_report.py`)
+
+`python bench/intent_report.py <run dir> --truth <truth.json> [--out docs/bench-2026-11-intent-report.md]` reads
+`sessions.jsonl` and `grades.jsonl` and writes the report: the verdict first, then per-job tables by arm x model
+(correctness, consistency, tool calls, context and output tokens, wall time, cost), write safety, failures by class,
+job 2 invented facts when `grade.py --judge` ran, and the C vs D comparison. Upstream and harness failures are listed
+apart and never count against an arm. The report holds aggregates only. Emails become `<email>` and `--mask-name NAME`
+values (the demo owner's display name, repeatable) become `the rep`; the CLI refuses to write a report that still holds
+an email or a masked name. The verdict rule sits verbatim in the module docstring and in every report; it is fixed
+before the full run, so do not edit it afterwards. Exit codes: 0 written, 2 `sessions.jsonl` or `grades.jsonl` missing,
+3 the leak check failed (nothing written), 4 `--out` is inside the repo and no name to mask was found (pass `--mask-name`).
+The truth file holds owner emails rather than display names, so `--mask-name` is what covers the owner's full name; the
+email local-part tokens are masked as well.
+
+### Full run on demo day
+
+Seeding writes to portal 149614891: nothing below that starts with `seed.py --apply`, `reset.py --apply` or
+`restore.py --apply --yes` runs without your go. Variable names only; set the values in your shell, never in a file.
+The full run takes roughly 8-10 hours (490 sessions: 7 tasks x 7 cells x 10 reps, strictly sequential), so start it
+in the morning and keep the machine awake. The run needs a shell where `HUBSPOT_TOKEN_149614891`,
+`HUBSPOT_MCP_SERVER_SECRET` and (for the seed's rules file) `SEED_DEMO_USER_EMAIL` are set, the one-time setup above
+is done, and the CLI and Claude Code versions have not changed since the rehearsal.
+
+Two terminals. Terminal 1 runs the server (`bench/serve.sh` loops in the foreground); terminal 2 runs the seed scripts,
+`intent_run.py`, grading and the report. Run the common block in both (replace `<day>` with `2026-11-06` or `2026-11-10`;
+run it again with the new day on 10 Nov, since `T` is per shell). Both terminals also need the same
+`HUBSPOT_MCP_SERVER_SECRET` value, and terminal 2 needs `HUBSPOT_TOKEN_149614891`. Generate the secret once in terminal 1
+(`export HUBSPOT_MCP_SERVER_SECRET=$(openssl rand -hex 32)`) and export that same value in terminal 2: set values in the
+shell, never in a file. `RULES_DIR` is a fixed path so both terminals use the same directory:
+
+```bash
+SEED=/Users/izzy/Documents/hubspot-forecast            # seed repo; run its scripts from here
+export T=$SEED/demo/seed/out/truth-enterprise-<day>.json
+export RULES_DIR=$HOME/.hubspot-bench-rules            # outside any repo: the YAML names the demo owner's email
+mkdir -p "$RULES_DIR" && chmod 700 "$RULES_DIR"
+```
+
+#### 6 Nov: dress rehearsal (seed dated 6 Nov, smoke, judge sample)
+
+6 Nov is the first valid demo day (window 6 to 24 Nov). The rehearsal's seed carries the as-of date 2026-11-06, so its
+answer key differs from the 10 Nov key: never compare figures across the two.
+
+Terminal 2 (steps 1 to 3a):
+
+```bash
+# 1. Plan (offline), then seed. The apply step needs your go.
+cd "$SEED"
+python3 demo/seed/seed.py --portal enterprise --demo-month 2026-11 --demo-day 2026-11-06 --plan
+python3 demo/seed/seed.py --portal enterprise --demo-month 2026-11 --demo-day 2026-11-06 \
+    --expect-portal 149614891 --apply --yes
+sleep 90                                                # Search indexing lag
+
+# 2. Category check (read-only): the diff must list no change. A drifted forecast category means the seed's
+#    pinning step did not hold; stop and re-run restore.py --apply --yes before any session.
+python3 demo/seed/restore.py --expect-portal 149614891 --apply
+
+# 3a. Rules file for the server (arm D previews every write, as arm C does)
+cp "$SEED/demo/seed/out/rules-enterprise.yaml" "$RULES_DIR/149614891.yaml"
+```
+
+Terminal 1 (step 3b, leave it running):
+
+```bash
+cd /Users/izzy/Documents/hubspot-mcp
+export HUBSPOT_PORTAL=149614891 HUBSPOT_MCP_RULES_DIR="$RULES_DIR"
+export HUBSPOT_MCP_GROUPED_FORCE_PREVIEW=1
+bench/serve.sh
+```
+
+Terminal 2 (steps 4 to 6). Run directories get explicit names with `--out`, so no later step guesses with `ls -dt`:
+
+```bash
+cd /Users/izzy/Documents/hubspot-mcp
+OWNER="<owner display name>"                            # the demo owner's name, as the answers print it
+
+# 4. Smoke (49 sessions), then 3 more reps of job 2 so the judge sample has at least 20 items to draw from
+SMOKE=bench/runs/2026-11-06-smoke-intent
+JOB2=bench/runs/2026-11-06-job2-intent
+.venv/bin/python bench/intent_run.py --truth "$T" --dry-run
+.venv/bin/python bench/intent_run.py --truth "$T" --rules-dir "$RULES_DIR" --smoke --out "$SMOKE"
+.venv/bin/python bench/intent_run.py --truth "$T" --rules-dir "$RULES_DIR" --only job2 --reps 3 --out "$JOB2"
+
+# 5. Grade both, check the report renders, build the judge validation kit (blind ids, masked answers)
+for D in "$SMOKE" "$JOB2"; do .venv/bin/python bench/grade.py "$D" --truth "$T"; done
+.venv/bin/python bench/intent_report.py "$SMOKE" --truth "$T" --out "$SMOKE/intent-report.md" --mask-name "$OWNER"
+KIT=bench/runs/judge-kit-2026-11-06                     # must stay under bench/runs/: the packet holds answer-key values
+.venv/bin/python bench/judge_kit.py sample "$SMOKE" "$JOB2" --truth "$T" --n 20 --seed 20261106 --out "$KIT" --mask-name "$OWNER"
+.venv/bin/python bench/judge_kit.py judge "$KIT" --truth "$T" --mask-name "$OWNER"   # one claude -p call per item; writes $KIT/judge.csv
+
+# 6. Hand $KIT/packet.md plus grader_A.csv and grader_B.csv to two people (never key.json). When both CSVs are back:
+.venv/bin/python bench/judge_kit.py kappa "$KIT"
+```
+
+Gate before 10 Nov: judge-versus-human-consensus kappa of at least 0.8 over at least 10 consensus items, with every
+sampled item labelled by both graders and the judge. The `kappa` command prints PASS, FAIL, INSUFFICIENT (kappa clears
+0.8 on fewer than 10 consensus items), INVALID (a blank, missing, unknown or repeated item: finish the files) or
+UNDEFINED (the judge and the consensus each used one class only, typically when no answer holds an invented fact:
+draw a larger sample or add seeded items that do, and do not count it as a pass). Only PASS clears the gate. Below
+0.8, fix the rubric (bump `JUDGE_RUBRIC_VERSION`), re-sample and re-validate. The judge runs on Opus and Opus is also
+one of the two models under test; the kit pools both models' answers, so read the notes for any pattern confined to
+the Opus answers. If it cannot clear by the morning of 10 Nov, run the full run
+without `--judge` and report job 2 invented facts as not judged. The rehearsal also shows whether arm A and B sessions
+authenticate headless (`mcp_needs-auth` on every A and B session means they do not): fix that before 10 Nov.
+
+#### 10 Nov: full run (`--reps 10`)
+
+Terminal 2 (steps 1 to 3a):
+
+```bash
+# 1. Put the portal back to a clean state, then reset and re-seed for the demo day. Each apply needs your go.
+cd "$SEED"
+python3 demo/seed/restore.py --expect-portal 149614891 --apply --yes      # removes what the rehearsal wrote
+python3 demo/seed/reset.py --plan
+python3 demo/seed/reset.py --expect-portal 149614891 --apply --yes        # archives every tagged record
+sleep 90
+python3 demo/seed/seed.py --portal enterprise --demo-month 2026-11 --demo-day 2026-11-10 --plan
+python3 demo/seed/seed.py --portal enterprise --demo-month 2026-11 --demo-day 2026-11-10 \
+    --expect-portal 149614891 --apply --yes
+sleep 90
+
+# 2. Category check (read-only): the diff must list no change.
+python3 demo/seed/restore.py --expect-portal 149614891 --apply
+#    Then probe notes_last_contacted and notes_next_activity_date on D01, D02 and one clean deal against the answer
+#    key (seed README, "Validity window"). No script in this repo does that probe yet; do it read-only in HubSpot.
+
+# 3a. Rules file for the server (step 3b below restarts the server so it serves the 10 Nov rules)
+cp "$SEED/demo/seed/out/rules-enterprise.yaml" "$RULES_DIR/149614891.yaml"
+```
+
+Terminal 1 (step 3b): stop the rehearsal's server first, then start this one and leave it running
+(`HUBSPOT_MCP_GROUPED_FORCE_PREVIEW=1` is the arm D tier):
+
+```bash
+cd /Users/izzy/Documents/hubspot-mcp
+export HUBSPOT_PORTAL=149614891 HUBSPOT_MCP_RULES_DIR="$RULES_DIR"
+export HUBSPOT_MCP_GROUPED_FORCE_PREVIEW=1
+bench/serve.sh
+```
+
+Terminal 2 (steps 4 and 5):
+
+```bash
+cd /Users/izzy/Documents/hubspot-mcp
+OWNER="<owner display name>"                            # the demo owner's name, as the answers print it
+
+# 4. Plan, then the full run in the background (490 sessions, roughly 8-10 hours). The run directory is named
+#    up front with --out; the runner creates it within seconds, and a failed pre-flight leaves only an empty
+#    directory, so fix the cause and rerun with the same --out.
+RUN=bench/runs/2026-11-10-full-intent
+.venv/bin/python bench/intent_run.py --truth "$T" --dry-run
+#    caffeinate -ims keeps the Mac awake while the run lives (the Mac must stay on mains power; closing the lid still
+#    sleeps it unless an external display is attached). --stop-before is the deadline below, with a margin.
+caffeinate -ims nohup .venv/bin/python bench/intent_run.py --truth "$T" --rules-dir "$RULES_DIR" --reps 10 \
+    --out "$RUN" --stop-before 2026-11-11T08:30:00Z > bench/runs/full-run-2026-11-10.log 2>&1 &
+jq -r '[.task_id,.arm,.model,.attempt,(.failure_class//"ok")]|@tsv' "$RUN/sessions.jsonl" | sort | uniq -c   # progress, once the first session has finished
+
+# 5. After "done ->" in the log: grade with the judge, then the report with the verdict
+.venv/bin/python bench/grade.py "$RUN" --truth "$T" --judge --mask-name "$OWNER"
+.venv/bin/python bench/intent_report.py "$RUN" --truth "$T" --mask-name "$OWNER" \
+    --out docs/bench-2026-11-intent-report.md
+```
+
+During the run: do not touch portal 149614891 (Search is rate limited and every session assumes seed state), and do not
+edit `bench/intent_report.py`'s rule. Exit 2 is a pre-flight failure (nothing ran), 3 a restore that failed twice (the
+portal is dirty: fix it with `restore.py`), 4 a skill or tool leak. Exit 5 means `--stop-before` was reached.
+
+**Deadline.** The answer key's "today" is fixed at 2026-11-10 in the rules file, whatever the clock says; what breaks the
+data is the first seeded future activity turning past, at **2026-11-11 09:00 UTC (10:00 Berlin)** (nothing is seeded on
+2026-11-10 itself). Every session must start before then: hence `--stop-before 2026-11-11T08:30:00Z`.
+
+**Resume.** If the run stops (crash, sleep, network drop, expired login, exit 3 after fixing the portal, exit 5), rerun
+with `--resume "$RUN"` and the same `--truth`, `--rules-dir` and task selection (`--reps 10`, no `--only`):
+
+```bash
+caffeinate -ims nohup .venv/bin/python bench/intent_run.py --truth "$T" --rules-dir "$RULES_DIR" --reps 10 \
+    --resume "$RUN" --stop-before 2026-11-11T08:30:00Z >> bench/runs/full-run-2026-11-10.log 2>&1 &
+```
+
+The resume re-runs the pre-flight checks and the restore, refuses if the tasks, cells, reps, answer key, jobs or rules
+differ from the original run, or if the portal no longer matches the run's `baseline.json` (re-seeded or changed). It
+skips every finished session (an upstream failure that already had its re-run counts as finished; one without it runs
+again), keeps numbering sessions where the run stopped, and appends an entry to `meta.json` `resumes`. A last line cut
+short by the crash moves to `sessions.jsonl.partial`. Grade and report read the one directory as usual. When the verdict is
+REJECTED, stop (PLAN phase 4): the demo stays on plugin skills. `docs/bench-2026-11-intent-report.md` quotes the run
+directory name and holds no record names; read it once for real names before it leaves the machine.
+
 ## Files
 
 - `tasks.jsonl`: 20 tasks with `{TEST_CONTACT}` / `{TEST_DEAL}` placeholders and completion checks: 12 from the first bench, four skill tasks (t13–t16), four boundary prompts (t17–t20) with charter and skill labels.
@@ -228,6 +414,7 @@ failure (`model_fail` column, `answer_ok` false, `details.block_missing`).
 - `serve.sh`: restart loop for the local server; `PORT` and `HUBSPOT_MCP_ROUTER` select the instance.
 - `scenarios.jsonl`, `multiturn.py`, `multiturn_report.py`: multi-turn sessions (one skill, several user turns) and their report.
 - `intent_run.py`, `portal_read.py`, `jobs.jsonl`, `intent_interface.md`: the intent benchmark (section above): runner, read-only portal reader, the seven tasks, the shared contract.
+- `grade.py`, `intent_report.py`: grader and the report with the pre-registered verdict (sections above); `judge.py`, `judge_kit.py`: the job 2 LLM judge and its human-validation kit (Phase 4).
 
 ## Gotchas
 
