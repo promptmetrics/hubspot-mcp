@@ -13,9 +13,10 @@ Choices a reviewer should know about:
 * A name that matches more than one open deal returns ``status: "ambiguous"`` with
   candidates. It never guesses, and nothing is stored.
 * The meeting and note attach to the deal, its primary company, and its contact,
-  but only where that target is unambiguous. A deal with several contacts, or
-  several companies and none marked Primary, gets no association to that kind
-  and the result says so in ``warnings``.
+  and each task to the deal and that company, but only where the target is
+  unambiguous. A deal with several contacts, or several companies and none
+  marked Primary, gets no association to that kind and the result says so in
+  ``warnings``.
 * A new contact whose email already exists, or whose name matches a contact of the
   company, is reused (linked to the company and the deal), not duplicated.
 * Dates arrive as ISO text. Words like "Friday" are the model's job; the result
@@ -490,8 +491,9 @@ async def build_changeset(
                 "op": "create",
                 "object_type": "tasks",
                 "properties": task_props,
-                "associations": _targets(deal_id, None, None),
-                "summary": f"Create task {task.subject.strip()!r} due {task.due_date.isoformat()} on deal {deal_name}",
+                "associations": _targets(deal_id, company_id, None),
+                "summary": f"Create task {task.subject.strip()!r} due {task.due_date.isoformat()} on deal {deal_name}"
+                + (f" and company {company_name}" if company_name else ""),
             }
         )
 
@@ -605,7 +607,7 @@ async def pronova_log_meeting_outcome(
     close_date: Annotated[date | None, Field(description="New expected close date as ISO YYYY-MM-DD. Omit to leave it unchanged.")] = None,
     amount: Annotated[float | None, Field(description="New deal amount as a plain number, no symbol or 'k' (24000, not 24k). Omit to leave it unchanged.")] = None,
     currency: Annotated[str | None, Field(description="Three-letter currency code for the new amount, for example EUR. Needs amount.")] = None,
-    tasks: Annotated[list[TaskIn] | None, Field(description="Follow-ups the rep owes. Each becomes a task on the deal.")] = None,
+    tasks: Annotated[list[TaskIn] | None, Field(description="Follow-ups the rep owes. Each becomes a task on the deal and its company.")] = None,
     new_contacts: Annotated[list[NewContactIn] | None, Field(description="People met who are not in HubSpot yet. Each is linked to the company and the deal; known people are reused.")] = None,
     meeting_time: Annotated[str | None, Field(description="When it took place: ISO date or date-time, read in the portal timezone. Omit for the as_of date or now.")] = None,
 ) -> dict[str, Any]:

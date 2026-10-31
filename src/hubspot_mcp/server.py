@@ -621,7 +621,7 @@ def _trace_tool_call(portal_id: str | None, name: str, mode: str, ok: bool, star
 
 
 async def _run_domain_tool(
-    ctx: Context, name: str, kwargs: dict[str, Any], *, mode: str = "full"
+    ctx: Context, name: str, kwargs: dict[str, Any], *, mode: str = "full", force_preview: bool = False
 ) -> Any:
     """Run one domain tool the way its registered MCP wrapper does.
 
@@ -630,12 +630,14 @@ async def _run_domain_tool(
     MRTR resume, the write gate in ``handle_tool`` and the inline confirmation
     request behave identically whichever surface the model called. ``mode``
     only labels the trace event, so a run can be split by surface afterwards.
+    ``force_preview`` turns an AUTO-tier write into a CONFIRM-tier preview; only
+    the grouped surface sets it, and only under its benchmark env switch.
     """
     started = time.perf_counter()
     lf = await _session(ctx)
     ok = False
     try:
-        result = await _run_domain_tool_for(ctx, lf, name, kwargs)
+        result = await _run_domain_tool_for(ctx, lf, name, kwargs, force_preview=force_preview)
         ok = True
         return result
     finally:
@@ -643,7 +645,7 @@ async def _run_domain_tool(
 
 
 async def _run_domain_tool_for(
-    ctx: Context, lf: dict[str, Any], name: str, kwargs: dict[str, Any]
+    ctx: Context, lf: dict[str, Any], name: str, kwargs: dict[str, Any], *, force_preview: bool = False
 ) -> Any:
     if lf.get("auth_error"):
         if (guidance := _not_connected_result(lf)) is not None:
@@ -688,7 +690,10 @@ async def _run_domain_tool_for(
 
     try:
         result = await handle_tool(
-            lf["client"], lf["cache"], lf["portal_config"], {"tool_name": name, "input": kwargs}
+            lf["client"],
+            lf["cache"],
+            lf["portal_config"],
+            {"tool_name": name, "input": kwargs, **({"force_preview": True} if force_preview else {})},
         )
     except HandlerError as exc:
         raise ToolError(exc.error["message"]) from exc
@@ -701,11 +706,16 @@ async def _run_domain_tool_for(
 
     # A write that needs a human decision asks for it inline, when the
     # client can answer. AUTO-tier writes already applied and never reach
-    # here with status "preview".
+    # here with status "preview". Under force_preview (the grouped bench
+    # control) the plain preview goes back instead: headless Claude Code
+    # declares form elicitation but declines every form, so the inline ask
+    # would reject each write, while the intent surface it is compared with
+    # hands the model a confirmation id to approve.
     if (
         isinstance(data, dict)
         and data.get("status") == "preview"
         and data.get("action_id")
+        and not force_preview
         and _supports_form_elicitation(ctx)
     ):
         return _confirmation_request(data)

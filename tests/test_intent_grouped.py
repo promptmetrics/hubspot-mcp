@@ -630,6 +630,16 @@ async def test_get_sales_rules_returns_the_rules_their_markdown_and_the_hash(ser
     assert http.calls == [], "the rules are read from the rules file, not HubSpot"
 
 
+async def test_get_sales_rules_reports_the_force_preview_tier_the_server_runs_at(server_mod, http, monkeypatch):
+    for value, expected in ((None, False), ("", False), ("0", False), ("true", False), ("1", True)):
+        if value is None:
+            monkeypatch.delenv("HUBSPOT_MCP_GROUPED_FORCE_PREVIEW", raising=False)
+        else:
+            monkeypatch.setenv("HUBSPOT_MCP_GROUPED_FORCE_PREVIEW", value)
+        data = _data(await call(server_mod, "get_sales_rules", {}))
+        assert data["force_preview"] is expected, value
+
+
 # --- state of the session ------------------------------------------------------------------
 
 
@@ -670,3 +680,82 @@ async def test_grouped_calls_are_traced_as_grouped(server_mod, monkeypatch):
     assert result.is_error is False, _text(result)
     events = [e for e in get_recent_traces(PORTAL) if e.event_type == "tool_call"]
     assert [(e.data["tool_name"], e.data["mode"]) for e in events] == [("hubspot_get_object", "grouped")]
+
+
+# --- the benchmark's preview-everything switch (arm D) --------------------------
+
+FORCE_ENV = "HUBSPOT_MCP_GROUPED_FORCE_PREVIEW"
+CREATE_CONTACT_ARGS = {"action": "create", "properties": {"firstname": "Ada", "lastname": "Example", "email": "ada@example.com"}}
+
+
+async def test_the_force_preview_switch_is_off_unless_the_env_var_is_one(server_mod, http, monkeypatch):
+    http.route("POST", "/crm/v3/objects/contacts", {"id": "900", "properties": {}})
+    for value in (None, "", "0", "true"):
+        if value is None:
+            monkeypatch.delenv(FORCE_ENV, raising=False)
+        else:
+            monkeypatch.setenv(FORCE_ENV, value)
+        result = await call(server_mod, "manage_contact", CREATE_CONTACT_ARGS)
+        assert _data(result)["status"] == "applied", f"{FORCE_ENV}={value!r} must not change the tier"
+
+
+async def test_with_the_switch_on_a_write_that_would_auto_apply_comes_back_as_a_preview(server_mod, http, monkeypatch):
+    monkeypatch.setenv(FORCE_ENV, "1")
+    http.route("POST", "/crm/v3/objects/contacts", {"id": "900", "properties": {}})
+    preview = await _preview(server_mod, "manage_contact", CREATE_CONTACT_ARGS, http)
+    assert preview["approval_tier"] == "CONFIRM"
+    assert preview["requires_count"] is False
+    pending = await call(server_mod, "write_actions", {"action": "list"})
+    assert preview["action_id"] in json.dumps(_data(pending))
+    approved = await _approve(server_mod, preview)
+    assert approved.is_error is False, _text(approved)
+    assert [(m, p) for m, p, _ in http.writes()] == [("POST", "/crm/v3/objects/contacts")]
+
+
+async def test_the_switch_does_not_reach_the_full_or_intent_surfaces(server_mod, http, monkeypatch):
+    monkeypatch.setenv(FORCE_ENV, "1")
+    http.route("POST", "/crm/v3/objects/contacts", {"id": "900", "properties": {}})
+    full = await call(
+        server_mod,
+        "hubspot_create_object",
+        {"object_type": "contacts", "properties": CREATE_CONTACT_ARGS["properties"]},
+        surface="mcp",
+    )
+    assert _data(full)["status"] == "applied"
+
+
+async def test_the_switch_leaves_a_write_that_already_needs_confirmation_unchanged(server_mod, http, monkeypatch):
+    http.route("GET", "/crm/v3/objects/deals/101?properties=amount", {"id": "101", "properties": {"amount": "100"}})
+    args = {"action": "update", "id": "101", "properties": {"amount": "5"}}
+    monkeypatch.delenv(FORCE_ENV, raising=False)
+    before = _data(await call(server_mod, "manage_deal", args))
+    monkeypatch.setenv(FORCE_ENV, "1")
+    after = _data(await call(server_mod, "manage_deal", args))
+    assert before["status"] == after["status"] == "preview"
+    assert before["approval_tier"] == after["approval_tier"]
+    assert before["requires_count"] == after["requires_count"]
+
+
+async def test_with_the_switch_on_a_client_that_declines_forms_still_gets_an_approvable_preview(
+    server_mod, http, monkeypatch
+):
+    # Headless Claude Code declares form elicitation and declines every form; the inline ask would reject the write.
+    from mcp import types as T
+
+    asked: list[Any] = []
+
+    async def decline(ctx, params):
+        asked.append(params)
+        return T.ElicitResult(action="decline")
+
+    monkeypatch.setenv(FORCE_ENV, "1")
+    http.route("POST", "/crm/v3/objects/contacts", {"id": "900", "properties": {}})
+    async with Client(server_mod.grouped, elicitation_callback=decline) as client:
+        result = await client.call_tool("manage_contact", CREATE_CONTACT_ARGS)
+    data = _data(result)
+    assert asked == []
+    assert data["status"] == "preview" and data["action_id"]
+    assert http.writes() == []
+    approved = await _approve(server_mod, data)
+    assert approved.is_error is False, _text(approved)
+    assert [(m, p) for m, p, _ in http.writes()] == [("POST", "/crm/v3/objects/contacts")]

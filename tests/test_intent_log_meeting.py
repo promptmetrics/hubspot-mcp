@@ -218,7 +218,9 @@ async def test_the_changeset_is_stored_pending_with_the_exact_ops(env, http):
     assert by_type["notes"]["properties"]["hs_note_body"].startswith("<p>Outcome: Agreed to a pilot</p>")
     assert "Follow-ups" in by_type["notes"]["properties"]["hs_note_body"]
     assert by_type["tasks"]["properties"]["hs_timestamp"] == "2026-11-06T11:00:00.000Z"
-    assert [a["to"]["object_type"] for a in by_type["tasks"]["associations"]] == ["deals"]
+    assert [a["to"] for a in by_type["tasks"]["associations"]] == [
+        {"object_type": "deals", "id": "1"}, {"object_type": "companies", "id": "100"},
+    ]
     contact = by_type["contacts"]
     assert contact["properties"] == {
         "firstname": "Maria", "lastname": "Lopez", "email": "maria.lopez@acme.example.com", "jobtitle": "CFO",
@@ -248,6 +250,7 @@ async def test_apply_creates_the_records_and_undo_leaves_no_created_record_behin
         for target in (("deals", "1"), ("companies", "100"), ("contacts", "10")):
             assert (kind, created[kind][0], *target) in http.associations, f"{kind} -> {target}"
     assert ("tasks", created["tasks"][0], "deals", "1") in http.associations
+    assert ("tasks", created["tasks"][0], "companies", "100") in http.associations
     assert created["tasks"][1]["hs_task_subject"] == "Send the security document"
     maria = next(i for (t, i), p in http.objects.items() if t == "contacts" and p.get("firstname") == "Maria")
     assert ("contacts", maria, "deals", "1") in http.associations

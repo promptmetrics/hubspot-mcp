@@ -22,7 +22,7 @@ from hubspot_mcp.cache import SchemaCache, ensure_custom_schema_cached, warm_sta
 from hubspot_mcp.client import HubSpotClient
 from hubspot_mcp.config import PortalConfig
 from hubspot_mcp.models import BatchApprovalMode, RiskLevel, TaskIntent
-from hubspot_mcp.policy import AUTO, FULL_GATE
+from hubspot_mcp.policy import AUTO, CONFIRM, FULL_GATE
 from hubspot_mcp.safety import apply_write
 from hubspot_mcp.scope_registry import (
     RAW_API_WRITE_METHODS,
@@ -391,6 +391,10 @@ async def handle_tool(client, cache, portal_config: PortalConfig, params: dict[s
         filter_summary=str(tool_input.get("filter_summary", "")) if isinstance(tool_input, dict) else "",
     )
     tier = aw.preview_data.get("approval_tier")
+    # The grouped surface can be told to preview every write (benchmark arm D, matching the
+    # intent surface). Only an AUTO classification moves; CONFIRM and FULL_GATE are untouched.
+    if params.get("force_preview") and tier == AUTO:
+        tier = CONFIRM
     # Bounded Autonomy (Phase 2): a provably-safe interactive write auto-applies
     # (act-and-notify) — execute now, report the result + an undo command.
     # Loop-originated writes (loop_step_number set) NEVER auto-apply; the durable

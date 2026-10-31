@@ -38,3 +38,6 @@ hubspot.config.yml
 
 # Benchmark session transcripts: local, may contain real portal data
 bench/runs/
+
+# Tool-event log written by a session hook; binary, holds session content
+.claude/self-improve/

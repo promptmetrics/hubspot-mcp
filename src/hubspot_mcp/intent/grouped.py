@@ -31,6 +31,7 @@ same sales rules as arm C, so the comparison does not turn on who was told what
 """
 from __future__ import annotations
 
+import os
 from typing import Annotated, Any, Literal
 from urllib.parse import urlencode
 
@@ -42,6 +43,11 @@ from hubspot_mcp.intent import common
 from hubspot_mcp.intent import rules as rules_mod
 
 MAX_LIMIT = 200
+
+# Benchmark switch, off unless the server process starts with it set to "1". When on, a write
+# that /mcp would auto-apply comes back as a preview instead, so arm D asks for approval exactly
+# as arm C does. Read on every call; nothing else on this surface changes.
+FORCE_PREVIEW_ENV = "HUBSPOT_MCP_GROUPED_FORCE_PREVIEW"
 
 RecordId = Annotated[str | None, Field(description="Record id. Set it to fetch that one record; leave it out to search.")]
 Filters = Annotated[
@@ -83,7 +89,9 @@ EngagementAssociations = Annotated[
 async def _domain(ctx: Context, tool: str, kwargs: dict[str, Any]) -> Any:
     from hubspot_mcp import server
 
-    return await server._run_domain_tool(ctx, tool, kwargs, mode="grouped")
+    return await server._run_domain_tool(
+        ctx, tool, kwargs, mode="grouped", force_preview=os.environ.get(FORCE_PREVIEW_ENV) == "1"
+    )
 
 
 def _search_body(
@@ -410,6 +418,8 @@ async def get_sales_rules(ctx: Context) -> Any:
         **rules_mod.rules_stamp(rules),
         "rules": rules.model_dump(mode="json"),
         "markdown": rules_mod.render_sales_rules_md(rules),
+        # Lets the benchmark runner check the tier arm D really runs at, instead of trusting a flag.
+        "force_preview": os.environ.get(FORCE_PREVIEW_ENV) == "1",
     }
 
 
