@@ -305,12 +305,14 @@ KIT=bench/runs/judge-kit-2026-11-06                     # must stay under bench/
 .venv/bin/python bench/judge_kit.py sample "$SMOKE" "$JOB2" --truth "$T" --n 20 --seed 20261106 --out "$KIT" --mask-name "$OWNER"
 .venv/bin/python bench/judge_kit.py judge "$KIT" --truth "$T" --mask-name "$OWNER"   # one claude -p call per item; writes $KIT/judge.csv
 
-# 6. Hand $KIT/packet.md plus grader_A.csv and grader_B.csv to two people (never key.json). When both CSVs are back:
+# 6. One grader (decided 2026-10-31): fill in grader_A.csv from $KIT/packet.md (never open key.json or judge.csv).
+#    Leave grader_B.csv blank, or delete it; kappa then compares the judge with grader A alone. When A is done:
 .venv/bin/python bench/judge_kit.py kappa "$KIT"
 ```
 
-Gate before 10 Nov: judge-versus-human-consensus kappa of at least 0.8 over at least 10 consensus items, with every
-sampled item labelled by both graders and the judge. The `kappa` command prints PASS, FAIL, INSUFFICIENT (kappa clears
+Gate before 10 Nov: judge-versus-human kappa of at least 0.8 over at least 10 labelled items, with every sampled item
+labelled by the grader and the judge. With one grader (the plan since 2026-10-31) "human" is grader A and the report
+states that human-human agreement was not measured; with a filled-in grader_B.csv it is the A=B consensus. The `kappa` command prints PASS, FAIL, INSUFFICIENT (kappa clears
 0.8 on fewer than 10 consensus items), INVALID (a blank, missing, unknown or repeated item: finish the files) or
 UNDEFINED (the judge and the consensus each used one class only, typically when no answer holds an invented fact:
 draw a larger sample or add seeded items that do, and do not count it as a pass). Only PASS clears the gate. Below

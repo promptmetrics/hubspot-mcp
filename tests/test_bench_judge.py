@@ -625,6 +625,26 @@ class TestKappaReport:
         assert rep["comparisons"]["judge vs consensus (A=B)"]["kappa"] == pytest.approx(1.0)
         assert rep["pass_verdict"].startswith("INSUFFICIENT") and "floor is 10" in rep["pass_verdict"]
 
+    def test_one_grader_with_grader_b_left_blank_checks_the_judge_against_a_alone(self, tmp_path):
+        # Decided 2026-10-31: no second grader. A blank grader_B.csv is not INVALID; the judge is compared with A.
+        write_grader_files(tmp_path, a="YYYY" + "N" * 8, b="-" * 12, j="YYY" + "N" * 9)
+        rep = judge_kit.kappa_report(tmp_path)
+        assert rep["single_grader"] is True and list(rep["comparisons"]) == ["A vs judge"]
+        assert rep["comparisons"]["A vs judge"]["kappa"] == 0.8 and rep["pass_verdict"] == "PASS"
+        assert "human-human agreement not measured" in rep["pass_rule"]
+        assert "grader A labelled 12" in judge_kit.format_kappa(rep)
+
+    def test_one_grader_with_grader_b_deleted_and_a_low_kappa_fails(self, tmp_path):
+        write_grader_files(tmp_path, a="YYYYNNNNNNNN", b="-" * 12, j="NNNNYYYYNNNN")
+        (tmp_path / "grader_B.csv").unlink()
+        rep = judge_kit.kappa_report(tmp_path)
+        assert rep["single_grader"] is True and rep["pass_verdict"] == "FAIL"
+
+    def test_one_grader_still_needs_every_item_labelled(self, tmp_path):
+        write_grader_files(tmp_path, a="YYYYNNNNNNN-", b="-" * 12, j="YYYYNNNNNNNN")
+        rep = judge_kit.kappa_report(tmp_path)
+        assert rep["pass_verdict"].startswith("INVALID") and "grader_A.csv: 11 of 12" in rep["pass_verdict"]
+
     def test_blank_unknown_or_repeated_items_make_the_verdict_invalid(self, tmp_path):
         good = "YYYYNNNNNNNN"
         write_grader_files(tmp_path, a=good, b=good, j="YYYYNNNNNNN-")

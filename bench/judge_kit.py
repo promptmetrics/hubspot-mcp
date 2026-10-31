@@ -295,18 +295,28 @@ def kappa_report(directory: Path) -> dict[str, Any]:
         raise ValueError(f"{key_path.name} missing: kappa checks the label files against the sampled ids")
     ids = set(json.loads(key_path.read_text(encoding="utf-8")))
     a, wa, ra = read_labels(directory / "grader_A.csv")
-    b, wb, rb = read_labels(directory / "grader_B.csv")
+    b_path = directory / "grader_B.csv"
+    b, wb, rb = read_labels(b_path) if b_path.exists() else ({}, [], [])
     j, wj, rj = read_labels(directory / "judge.csv")
-    problems = [p for name, labels, rep in (("grader_A.csv", a, ra), ("grader_B.csv", b, rb), ("judge.csv", j, rj))
-                for p in label_problems(name, labels, rep, ids)]
-    consensus = {i: a[i] for i in a if i in b and a[i] is not None and a[i] == b[i]}
-    comparisons = {
-        "A vs B": cohen_kappa(*_paired(a, b)),
-        "A vs judge": cohen_kappa(*_paired(a, j)),
-        "B vs judge": cohen_kappa(*_paired(b, j)),
-        "judge vs consensus (A=B)": cohen_kappa(*_paired(j, consensus)),
-    }
-    main = comparisons["judge vs consensus (A=B)"]
+    # One human (decided 2026-10-31: no second grader): with grader_B.csv absent or every label blank, the judge is
+    # checked against grader A alone, under the same 0.8 bar and the same item floor.
+    single = all(v is None for v in b.values())
+    files = (("grader_A.csv", a, ra), ("judge.csv", j, rj)) if single else (
+        ("grader_A.csv", a, ra), ("grader_B.csv", b, rb), ("judge.csv", j, rj))
+    problems = [p for name, labels, rep in files for p in label_problems(name, labels, rep, ids)]
+    if single:
+        consensus = {i: v for i, v in a.items() if v is not None}
+        comparisons = {"A vs judge": cohen_kappa(*_paired(a, j))}
+        main = comparisons["A vs judge"]
+    else:
+        consensus = {i: a[i] for i in a if i in b and a[i] is not None and a[i] == b[i]}
+        comparisons = {
+            "A vs B": cohen_kappa(*_paired(a, b)),
+            "A vs judge": cohen_kappa(*_paired(a, j)),
+            "B vs judge": cohen_kappa(*_paired(b, j)),
+            "judge vs consensus (A=B)": cohen_kappa(*_paired(j, consensus)),
+        }
+        main = comparisons["judge vs consensus (A=B)"]
     if problems:
         verdict = f"INVALID ({'; '.join(problems)}): the pass rule is not met"
     elif main["kappa"] is None:
@@ -317,13 +327,16 @@ def kappa_report(directory: Path) -> dict[str, Any]:
         verdict = f"INSUFFICIENT (only {len(consensus)} consensus items, the floor is {MIN_CONSENSUS}): the pass rule is not met"
     else:
         verdict = "PASS"
-    return {"comparisons": comparisons, "consensus_items": len(consensus), "items": len(ids),
-            "pass_rule": f"judge vs consensus kappa >= {PASS_KAPPA}", "pass_verdict": verdict,
-            "problems": problems, "warnings": [*wa, *wb, *wj]}
+    rule = (f"judge vs grader A kappa >= {PASS_KAPPA} (one human grader; human-human agreement not measured)" if single
+            else f"judge vs consensus kappa >= {PASS_KAPPA}")
+    return {"comparisons": comparisons, "consensus_items": len(consensus), "items": len(ids), "single_grader": single,
+            "pass_rule": rule, "pass_verdict": verdict, "problems": problems, "warnings": [*wa, *wb, *wj]}
 
 
 def format_kappa(report: dict[str, Any]) -> str:
-    lines = [f"items sampled: {report['items']}, A=B consensus on {report['consensus_items']}", ""]
+    basis = (f"grader A labelled {report['consensus_items']}" if report.get("single_grader")
+             else f"A=B consensus on {report['consensus_items']}")
+    lines = [f"items sampled: {report['items']}, {basis}", ""]
     for name, c in report["comparisons"].items():
         kappa = f"{c['kappa']:.3f}" if c["kappa"] is not None else f"undefined ({c['undefined_reason']})"
         agree = f"{c['agreement']:.3f}" if c["agreement"] is not None else "-"
