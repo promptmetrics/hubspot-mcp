@@ -309,9 +309,20 @@ def test_arm_b_environment_is_an_allowlist_so_no_other_credential_in_the_shell_r
 
 
 def test_arm_b_runs_zsh_with_an_empty_zdotdir_so_the_operators_shell_profile_is_not_sourced(ctx, tmp_path):
-    env, _ = ir.session_env("B", {**OPERATOR_SHELL, "PATH": "/bin:/usr/bin"}, SECRET_ENV, ctx.cli_dir, tmp_path)
-    assert env["ZDOTDIR"] == str(tmp_path) and env["SHELL"].endswith("zsh")
+    # A stand-in zsh on PATH, so the test does not depend on the machine having zsh (CI's Ubuntu image has none).
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "zsh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (bindir / "zsh").chmod(0o755)
+    workdir = tmp_path / "session"
+    env, _ = ir.session_env("B", {**OPERATOR_SHELL, "PATH": str(bindir)}, SECRET_ENV, ctx.cli_dir, workdir)
+    assert env["ZDOTDIR"] == str(workdir) and env["SHELL"] == str(bindir / "zsh")
     env, _ = ir.session_env("B", OPERATOR_SHELL, SECRET_ENV, ctx.cli_dir)
+    assert "ZDOTDIR" not in env
+
+
+def test_without_zsh_on_path_arm_b_sets_no_shell_override(ctx, tmp_path):
+    env, _ = ir.session_env("B", {**OPERATOR_SHELL, "PATH": str(tmp_path)}, SECRET_ENV, ctx.cli_dir, tmp_path)
     assert "ZDOTDIR" not in env
 
 
