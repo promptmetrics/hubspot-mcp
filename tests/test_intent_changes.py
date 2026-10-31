@@ -889,9 +889,10 @@ async def test_hubspot_approve_write_cannot_execute_a_changeset(lf, http, env):
     calls_before = len(http.calls)
     async with Client(env["server"].mcp) as client:
         result = await client.call_tool("hubspot_approve_write", {"action_id": preview["confirmation_id"]})
-    assert result.is_error is True
+    assert result.is_error is True and "No pending preview found" in result.content[0].text
     assert len(http.calls) == calls_before, "the approve path must not make any HubSpot call"
     assert http.objects[("deals", "1")]["closedate"] == "2026-09-01"
+    assert await get_store().load_pending(PORTAL, preview["confirmation_id"]) is not None, "the changeset stays pending"
 
 
 async def test_old_reject_and_pending_list_leave_a_changeset_alone(lf, http, env):

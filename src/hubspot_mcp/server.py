@@ -340,7 +340,6 @@ grouped = MCPServer(
 )
 
 
-
 async def _probe_capabilities(portal_config: PortalConfig):
     """Probe portal entitlements; never fail startup over it."""
     from hubspot_mcp.capabilities import probe_portal, probe_was_conclusive

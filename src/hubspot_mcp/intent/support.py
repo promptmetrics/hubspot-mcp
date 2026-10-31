@@ -196,7 +196,7 @@ async def _find(
     found: dict[str, dict[str, Any]] = {}
     exact = _exact_filters(object_type, q)
     # An email or domain equality search hit the key itself, whatever form the user typed it in (a URL, mixed case).
-    strong = bool(exact) and exact[0]["filters"][0]["propertyName"] in ("email", "domain")
+    strong = exact is not None and bool(exact) and exact[0]["filters"][0]["propertyName"] in ("email", "domain")
     if exact:
         page = await common.search_page(lf, object_type, filter_groups=exact, properties=properties, limit=CANDIDATE_FETCH)
         found.update({str(r["id"]): r for r in page.get("results") or []})

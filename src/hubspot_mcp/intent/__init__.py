@@ -20,6 +20,9 @@ module level: the server registers these tools at import time.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any, cast
+
 from mcp.server.mcpserver import MCPServer
 
 INTENT_INSTRUCTIONS = (
@@ -75,9 +78,9 @@ def grouped_tool_registrations() -> list[tuple[str, object, str]]:
 
 def register_intent_tools(server: MCPServer) -> None:
     for name, fn, description in intent_tool_registrations():
-        server.add_tool(fn, name=name, description=description)
+        server.add_tool(cast(Callable[..., Any], fn), name=name, description=description)
 
 
 def register_grouped_tools(server: MCPServer) -> None:
     for name, fn, description in grouped_tool_registrations():
-        server.add_tool(fn, name=name, description=description)
+        server.add_tool(cast(Callable[..., Any], fn), name=name, description=description)

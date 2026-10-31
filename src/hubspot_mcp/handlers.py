@@ -534,7 +534,9 @@ async def execute_pending_write(
     """
     portal_id = portal_config.portal_id
     preview_data = await get_store().load_pending(portal_id, action_id)
-    if preview_data is None:
+    # Intent changesets share the pending store but are applied only by pronova_apply_changes; refuse them here
+    # explicitly, as handle_reject does, rather than relying on the record having no tool name.
+    if preview_data is None or preview_data.get("kind") == "intent_changeset":
         raise ExecuteError("not_found", f"No pending preview found with ID {action_id}.")
 
     required = preview_data.get("required_confirmation") or 0
