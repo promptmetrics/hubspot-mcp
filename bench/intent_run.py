@@ -335,18 +335,25 @@ def init_info(events: list[dict[str, Any]]) -> dict[str, Any]:
     return {"tools": [], "mcp_servers": [], "skills": [], "model": "", "missing": True}
 
 
-def check_init(arm: str, init: dict[str, Any], expected_skills: set[str], builtin: frozenset[str] = BUILTIN_SKILLS) -> dict[str, Any]:
-    """Skills, built-in tools and MCP status of one session against what its arm may see."""
+def check_init(arm: str, init: dict[str, Any], expected_skills: set[str], builtin: frozenset[str] = BUILTIN_SKILLS,
+               foreign: set[str] | frozenset[str] = frozenset()) -> dict[str, Any]:
+    """Skills, built-in tools and MCP status of one session against what its arm may see.
+
+    A leak is a skill another arm provides (``foreign``): HubSpot's CLI skills outside arm B, or the thin Pronova skills
+    in A or B. A skill no arm provides and not in BUILTIN_SKILLS is Claude Code's own and reaches every arm alike
+    (``send-to-project`` appeared on 2026-10-31 with 2.1.314 unchanged), so it is recorded as unknown, not a failure."""
     spec = ARMS[arm]
     seen = set(init["skills"])
-    unexpected = sorted(seen - builtin - expected_skills)
+    extra = seen - builtin - expected_skills
+    unexpected = sorted(extra & set(foreign))
+    unknown = sorted(extra - set(foreign))
     missing = sorted(expected_skills - seen)
     non_mcp = {t for t in init["tools"] if not t.startswith("mcp__")}
     tools_ok = non_mcp == set(spec["builtin_tools"])
     servers = {s.get("name"): s.get("status") for s in init["mcp_servers"] if isinstance(s, dict)}
     mcp_bad = [f"{spec['server']}:{servers.get(spec['server'], 'missing')}"] if servers.get(spec["server"]) != "connected" else []
     mcp_bad += [f"{n}:{s}" for n, s in servers.items() if n != spec["server"] and s != "connected"]
-    return {"skills_unexpected": unexpected, "skills_missing": missing, "tools_ok": tools_ok,
+    return {"skills_unexpected": unexpected, "skills_unknown": unknown, "skills_missing": missing, "tools_ok": tools_ok,
             "tools_seen": sorted(non_mcp), "mcp_bad": mcp_bad}
 
 
@@ -605,7 +612,8 @@ def run_session(task: dict[str, Any], cell: tuple[str, str], rep: int, ctx: Ctx,
     (ctx.out / f"events-{n:03d}-{task['id']}-{arm}-{model}-r{rep}-a{attempt}.jsonl").write_text(
         "\n".join(json.dumps(e) for e in events), encoding="utf-8")
     init = init_info(events)
-    checks = check_init(arm, init, expected) if not init.get("missing") else None
+    foreign = set().union(*ctx.expected_skills.values()) - expected if ctx.expected_skills else set()
+    checks = check_init(arm, init, expected, foreign=foreign) if not init.get("missing") else None
     summary = summarize(events)
     result = next((e for e in reversed(events) if e.get("type") == "result"), {})
     result_text = final_result_text(events)
@@ -623,7 +631,8 @@ def run_session(task: dict[str, Any], cell: tuple[str, str], rep: int, ctx: Ctx,
         answer_block=answer, confirmations=confirmations(summary, arm), summary=summary,
     )
     if checks:
-        record.update(skills_unexpected=checks["skills_unexpected"], skills_missing=checks["skills_missing"], tools_ok=checks["tools_ok"])
+        record.update(skills_unexpected=checks["skills_unexpected"], skills_unknown=checks["skills_unknown"],
+                      skills_missing=checks["skills_missing"], tools_ok=checks["tools_ok"])
     errors = [c.get("result_text") or "" for c in summary["tool_calls"] if c.get("is_error")]
     record["failure_class"], record["failure_detail"] = classify_failure(
         checks=checks, init_missing=bool(init.get("missing")), stderr=raw["stderr"] or "", result=result,

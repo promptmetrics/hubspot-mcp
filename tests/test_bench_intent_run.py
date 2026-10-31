@@ -410,10 +410,18 @@ def test_a_hubspot_skill_visible_to_arm_c_fails_the_session_as_a_harness_error(c
     assert "skills_unexpected: deal-management" in rec["failure_detail"]
 
 
-def test_any_skill_beyond_the_builtins_fails_arm_a(ctx):
+def test_a_hubspot_cli_skill_visible_to_arm_a_fails_the_session(ctx):
     claude = FakeClaude(ctx, lambda arm, t: events_for(arm, ctx, text=answer_text(t), skills_extra=["crm-lookup"]))
     rec = run(ctx, "job1", ("A", "sonnet"), claude)
     assert rec["failure_class"] == "harness" and rec["skills_unexpected"] == ["crm-lookup"]
+
+
+def test_a_new_claude_code_skill_no_arm_provides_is_recorded_not_failed(ctx):
+    claude = FakeClaude(ctx, lambda arm, t: events_for(arm, ctx, text=answer_text(t), skills_extra=["send-to-project"]))
+    for cell in (("A", "sonnet"), ("C", "sonnet")):
+        rec = run(ctx, "job1", cell, claude)
+        assert rec["failure_class"] is None, rec["failure_detail"]
+        assert rec["skills_unexpected"] == [] and rec["skills_unknown"] == ["send-to-project"]
 
 
 def test_a_missing_expected_skill_fails_the_session(ctx):
