@@ -75,6 +75,7 @@ B_ENV_ALLOW = frozenset({
 B_ENV_ALLOW_PREFIXES = ("LC_", "ANTHROPIC_", "CLAUDE_")
 CREDENTIAL_NAME_RE = re.compile(r"(?i)token|secret|password|passwd|credential|key")
 D_FORCE_PREVIEW_ENV = "HUBSPOT_MCP_GROUPED_FORCE_PREVIEW"
+INTENT_NO_INLINE_CONFIRM_ENV = "HUBSPOT_MCP_INTENT_NO_INLINE_CONFIRM"
 RESULT_TEXT_CAP = 60000  # the full final reply, for graders that scan prose (summary.final_text keeps 8000)
 
 SUFFIX_READ = "Do not change anything in HubSpot."
@@ -903,6 +904,15 @@ def check_server_rules(server: str, secret: str | None, fingerprint: str, *,
         if is_error or served != fingerprint:
             raise PreflightError(f"{path} serves rules {served!r}, the rendered rules are {fingerprint!r} "
                                  "(wrong rules dir, or a stale server process)")
+        if arm == "C":
+            # Headless Claude Code declares form elicitation and declines every form, so with the confirmation form
+            # on, every arm C write would be declined; arms A and B get no form in headless runs either.
+            inline = data.get("inline_confirm") if isinstance(data, dict) else None
+            listed[arm] = {**listed[arm], "inline_confirm": inline}
+            if inline is not False:
+                raise PreflightError(f"{path} asks the user in a confirmation form before applying (inline_confirm="
+                                     f"{inline!r}); restart the server with {INTENT_NO_INLINE_CONFIRM_ENV}=1 for a "
+                                     "benchmark run")
         if arm == "D":
             observed = bool(data.get("force_preview")) if isinstance(data, dict) else False
             listed[arm] = {**listed[arm], "force_preview": observed}

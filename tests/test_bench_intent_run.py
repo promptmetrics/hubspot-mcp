@@ -870,10 +870,28 @@ class FakeSurface:
         data = {"rules_hash": self.hashes[self.key]}
         if self.key == "grouped":
             data["force_preview"] = FORCE_PREVIEW_SERVED["value"]
+        if self.key == "intent" and INLINE_CONFIRM_SERVED["value"] is not None:
+            data["inline_confirm"] = INLINE_CONFIRM_SERVED["value"]
         return data, False
 
 
 FORCE_PREVIEW_SERVED = {"value": True}
+INLINE_CONFIRM_SERVED = {"value": False}
+
+
+@pytest.mark.parametrize(("served", "message"), [
+    (False, None), (True, "HUBSPOT_MCP_INTENT_NO_INLINE_CONFIRM=1"), (None, "inline_confirm=None"),
+])
+def test_arm_c_must_run_with_the_confirmation_form_off(monkeypatch, served, message):
+    # With the form on, headless Claude Code would decline every arm C write; an older server reports nothing.
+    monkeypatch.setattr(ir, "Surface", lambda url, secret=None: FakeSurface(
+        url, {"intent": 13, "grouped": 12}, {"intent": GOOD, "grouped": GOOD}))
+    monkeypatch.setitem(INLINE_CONFIRM_SERVED, "value", served)
+    if message is None:
+        assert ir.check_server_rules("http://127.0.0.1:8000", SECRET, GOOD)["C"]["inline_confirm"] is False
+    else:
+        with pytest.raises(ir.PreflightError, match=message):
+            ir.check_server_rules("http://127.0.0.1:8000", SECRET, GOOD)
 
 
 GOOD = "abc123def456"

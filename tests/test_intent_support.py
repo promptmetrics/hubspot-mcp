@@ -413,6 +413,13 @@ async def test_sales_rules_concise_is_the_plain_english_text_without_the_raw_val
     assert "rules" not in result and result["rules_md"]
 
 
+async def test_sales_rules_report_whether_apply_asks_the_user_in_a_form(env, monkeypatch):
+    monkeypatch.delenv("HUBSPOT_MCP_INTENT_NO_INLINE_CONFIRM", raising=False)
+    assert (await call(env, "pronova_get_sales_rules"))["inline_confirm"] is True
+    monkeypatch.setenv("HUBSPOT_MCP_INTENT_NO_INLINE_CONFIRM", "1")
+    assert (await call(env, "pronova_get_sales_rules"))["inline_confirm"] is False
+
+
 async def test_a_broken_rules_file_is_a_readable_tool_error(env):
     (env["rules_dir"] / f"{PORTAL}.yaml").write_text("silent_dayz: 3\n", encoding="utf-8")
     text = await call(env, "pronova_get_sales_rules", error=True)

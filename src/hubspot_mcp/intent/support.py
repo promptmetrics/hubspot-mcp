@@ -364,7 +364,9 @@ async def pronova_get_sales_rules(
     response_format: common.ResponseFormatParam = "concise",
 ) -> dict[str, Any]:
     lf = await common.session(ctx)
-    return await sales_rules_payload(lf, response_format)
+    # inline_confirm tells the benchmark runner whether pronova_apply_changes asks the user in a form; it checks the
+    # server before a run, as it checks the grouped surface's force_preview.
+    return {**await sales_rules_payload(lf, response_format), "inline_confirm": changeset.inline_confirm_enabled()}
 
 
 # --- get_deal ----------------------------------------------------------------

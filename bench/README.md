@@ -116,6 +116,8 @@ show in every session; `--tools Skill` leaves `Skill` as the only built-in tool;
    export HUBSPOT_PORTAL=149614891 HUBSPOT_MCP_RULES_DIR="$RULES_DIR"
    export HUBSPOT_MCP_SERVER_SECRET=$(openssl rand -hex 32)
    export HUBSPOT_MCP_GROUPED_FORCE_PREVIEW=1        # arm D previews every write, as arm C does; unset = AUTO tier
+   export HUBSPOT_MCP_INTENT_NO_INLINE_CONFIRM=1     # arm C: no confirmation form (headless Claude Code declines
+                                                     # every form); the runner refuses to start without it
    bench/serve.sh
    ```
 
@@ -197,6 +199,8 @@ every call): `intent/grouped.py` passes `force_preview=True` through `server._ru
 `handlers.handle_tool` turns an AUTO classification into CONFIRM, so the write returns `status: "preview"` and applies
 only after `write_actions(action="approve")`. CONFIRM and FULL_GATE writes, `/mcp` and `/mcp/intent` are unchanged.
 Tested in `tests/test_intent_grouped.py`.
+
+Arm C's confirmation form: outside the benchmark, `pronova_apply_changes` asks the user in a confirmation form whenever the client can show one, and applies only on the user's yes; the result's `confirmed_by` says `user`. Headless Claude Code declares forms but declines every one, so the benchmark server runs with `HUBSPOT_MCP_INTENT_NO_INLINE_CONFIRM=1` (off by default, only the exact value `1` counts): the model's call is the confirmation, as for arms A and B, and `confirmed_by` says so. `pronova_get_sales_rules` reports `inline_confirm`, and pre-flight aborts unless it is false.
 
 ### Grading (`bench/grade.py`)
 
@@ -281,7 +285,7 @@ Terminal 1 (step 3b, leave it running):
 ```bash
 cd /Users/izzy/Documents/hubspot-mcp
 export HUBSPOT_PORTAL=149614891 HUBSPOT_MCP_RULES_DIR="$RULES_DIR"
-export HUBSPOT_MCP_GROUPED_FORCE_PREVIEW=1
+export HUBSPOT_MCP_GROUPED_FORCE_PREVIEW=1 HUBSPOT_MCP_INTENT_NO_INLINE_CONFIRM=1
 bench/serve.sh
 ```
 
@@ -348,12 +352,12 @@ cp "$SEED/demo/seed/out/rules-enterprise.yaml" "$RULES_DIR/149614891.yaml"
 ```
 
 Terminal 1 (step 3b): stop the rehearsal's server first, then start this one and leave it running
-(`HUBSPOT_MCP_GROUPED_FORCE_PREVIEW=1` is the arm D tier):
+(`HUBSPOT_MCP_GROUPED_FORCE_PREVIEW=1` is the arm D tier; `HUBSPOT_MCP_INTENT_NO_INLINE_CONFIRM=1` turns off arm C's confirmation form, which headless sessions would decline):
 
 ```bash
 cd /Users/izzy/Documents/hubspot-mcp
 export HUBSPOT_PORTAL=149614891 HUBSPOT_MCP_RULES_DIR="$RULES_DIR"
-export HUBSPOT_MCP_GROUPED_FORCE_PREVIEW=1
+export HUBSPOT_MCP_GROUPED_FORCE_PREVIEW=1 HUBSPOT_MCP_INTENT_NO_INLINE_CONFIRM=1
 bench/serve.sh
 ```
 

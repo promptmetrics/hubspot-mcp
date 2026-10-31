@@ -981,3 +981,111 @@ async def test_apply_and_undo_end_to_end_through_the_intent_surface(lf, http, en
 )
 def test_same_value_compares_the_way_hubspot_echoes_values(a, b, equal):
     assert changes.same_value(a, b) is equal
+
+
+# --- the user's yes, asked by the server ----------------------------------------------------------------------------
+
+
+def _payload(result):
+    return result.structured_content or json.loads(result.content[0].text)
+
+
+async def test_a_client_with_forms_is_asked_and_the_users_yes_applies_the_changes(lf, http, env):
+    import mcp_types as T
+
+    _seed_deals(http, 2)
+    preview = await _propose(lf, [_update(1, closedate="2026-11-30"), _update(2, closedate="2026-11-30")])
+    asked = []
+
+    async def yes(ctx, params):
+        asked.append(params.message)
+        return T.ElicitResult(action="accept", content={"approve": True})
+
+    async with Client(env["server"].intent, elicitation_callback=yes) as client:
+        result = await client.call_tool("pronova_apply_changes",
+                                        {"confirmation_id": preview["confirmation_id"], "expected_count": 2})
+    data = _payload(result)
+    assert result.is_error is False and data["status"] == "applied" and data["confirmed_by"] == "user"
+    assert len(asked) == 1 and "Apply 2 change(s) to HubSpot: Fix close dates?" in asked[0]
+    assert "- Update deal 1" in asked[0] and preview["confirmation_id"] in asked[0]
+    assert http.objects[("deals", "1")]["closedate"] == "2026-11-30"
+
+
+@pytest.mark.parametrize("answer", ["decline", "cancel", "approve_false"])
+async def test_a_user_who_does_not_say_yes_gets_nothing_written_and_the_changeset_stays_pending(lf, http, env, answer):
+    import mcp_types as T
+
+    _seed_deals(http, 1)
+    preview = await _propose(lf, [_update(1, closedate="2026-11-30")])
+    calls_before = len(http.calls)
+
+    async def no(ctx, params):
+        if answer == "approve_false":
+            return T.ElicitResult(action="accept", content={"approve": False})
+        return T.ElicitResult(action=answer)
+
+    async with Client(env["server"].intent, elicitation_callback=no) as client:
+        result = await client.call_tool("pronova_apply_changes",
+                                        {"confirmation_id": preview["confirmation_id"], "expected_count": 1})
+    assert _payload(result)["status"] == "declined"
+    assert len(http.calls) == calls_before, "a no must not reach HubSpot"
+    assert http.objects[("deals", "1")]["closedate"] == "2026-09-01"
+    stored = await get_store().load_pending(PORTAL, preview["confirmation_id"])
+    assert stored["status"] == "pending"
+
+
+async def test_a_wrong_count_is_refused_before_the_user_is_asked(lf, http, env):
+    import mcp_types as T
+
+    _seed_deals(http, 1)
+    preview = await _propose(lf, [_update(1, closedate="2026-11-30")])
+    asked = []
+
+    async def yes(ctx, params):
+        asked.append(params.message)
+        return T.ElicitResult(action="accept", content={"approve": True})
+
+    async with Client(env["server"].intent, elicitation_callback=yes) as client:
+        result = await client.call_tool("pronova_apply_changes",
+                                        {"confirmation_id": preview["confirmation_id"], "expected_count": 7})
+    assert result.is_error is True and "does not match" in result.content[0].text and asked == []
+    assert http.objects[("deals", "1")]["closedate"] == "2026-09-01"
+
+
+async def test_a_client_without_forms_keeps_the_assistant_confirmed_path_and_says_so(lf, http, env):
+    _seed_deals(http, 1)
+    preview = await _propose(lf, [_update(1, closedate="2026-11-30")])
+    async with Client(env["server"].intent) as client:
+        result = await client.call_tool("pronova_apply_changes",
+                                        {"confirmation_id": preview["confirmation_id"], "expected_count": 1})
+    data = _payload(result)
+    assert data["status"] == "applied" and data["confirmed_by"] == "assistant"
+
+
+async def test_the_benchmark_switch_turns_the_form_off_and_the_result_says_so(lf, http, env, monkeypatch):
+    import mcp_types as T
+
+    monkeypatch.setenv(changes.INLINE_CONFIRM_OFF_ENV, "1")
+    _seed_deals(http, 1)
+    preview = await _propose(lf, [_update(1, closedate="2026-11-30")])
+    asked = []
+
+    async def refuse_all(ctx, params):  # what headless Claude Code does with every form
+        asked.append(params.message)
+        return T.ElicitResult(action="decline")
+
+    async with Client(env["server"].intent, elicitation_callback=refuse_all) as client:
+        result = await client.call_tool("pronova_apply_changes",
+                                        {"confirmation_id": preview["confirmation_id"], "expected_count": 1})
+    data = _payload(result)
+    assert asked == [] and data["status"] == "applied"
+    assert data["confirmed_by"] == "assistant (confirmation form off on this server)"
+
+
+@pytest.mark.parametrize("value", [None, "", "0", "true"])
+def test_the_form_is_on_unless_the_switch_is_exactly_one(monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv(changes.INLINE_CONFIRM_OFF_ENV, raising=False)
+    else:
+        monkeypatch.setenv(changes.INLINE_CONFIRM_OFF_ENV, value)
+    assert changes.inline_confirm_enabled() is True

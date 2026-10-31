@@ -38,6 +38,7 @@ even a killed process leaves records undo can find. A process that dies leaves
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import secrets
 from collections import Counter
@@ -49,6 +50,7 @@ from typing import Annotated, Any
 
 import anyio
 import httpx
+import mcp_types as T
 from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
@@ -1174,13 +1176,75 @@ async def list_pending(lf: dict[str, Any], limit: int = 50, response_format: str
 # --- tools -----------------------------------------------------------------
 
 
+INLINE_CONFIRM_OFF_ENV = "HUBSPOT_MCP_INTENT_NO_INLINE_CONFIRM"
+FORM_CHANGE_LINES = 15
+
+
+def inline_confirm_enabled() -> bool:
+    """The server asks the user itself before applying, when the client can show a form. Off only under the
+    benchmark switch: headless Claude Code declares form elicitation but declines every form, so a benchmark
+    session could never write, and the arms it is compared with get no form either."""
+    return os.environ.get(INLINE_CONFIRM_OFF_ENV) != "1"
+
+
+def _confirmation_form(record: dict[str, Any], confirmation_id: str) -> T.InputRequiredResult:
+    from hubspot_mcp import server
+
+    ops = record.get("ops") or []
+    lines = [f"Apply {record['change_count']} change(s) to HubSpot: {record['title']}?"]
+    lines += [f"- {op.get('summary')}" for op in ops[:FORM_CHANGE_LINES]]
+    if len(ops) > FORM_CHANGE_LINES:
+        lines.append(f"... and {len(ops) - FORM_CHANGE_LINES} more")
+    lines.append(f"confirmation_id: {confirmation_id}. pronova_undo_changes can revert it afterwards.")
+    return T.InputRequiredResult(
+        input_requests={
+            server._CONFIRM_KEY: T.ElicitRequest(
+                method="elicitation/create",
+                params=T.ElicitRequestFormParams(
+                    mode="form",
+                    message="\n".join(lines),
+                    requested_schema={
+                        "type": "object",
+                        "properties": {"approve": {"type": "boolean", "description": "Apply these changes."}},
+                        "required": ["approve"],
+                    },
+                ),
+            )
+        },
+        request_state=confirmation_id,
+    )
+
+
 async def pronova_apply_changes(
     ctx: Context,
     confirmation_id: Annotated[str, Field(description="The confirmation_id from a preview, like chg_abcdefghjkmn.")],
     expected_count: Annotated[int, Field(description="The preview's change_count. A different number is refused.")],
-) -> dict[str, Any]:
+) -> dict[str, Any] | T.InputRequiredResult:
+    """The user's yes is checked by the server where the client allows it: a client that shows forms gets a
+    confirmation form listing the changes, and only the user's answer to it applies them. Text in a CRM record
+    cannot answer that form. A client without forms keeps the earlier contract (the model confirms with the
+    user before calling), and the result says which kind of confirmation it had."""
+    from hubspot_mcp import server
+
     lf = await common.session(ctx)
-    return await apply_changeset(lf, confirmation_id, expected_count)
+    answer = server._mrtr_answer(ctx)
+    if answer is not None:
+        answered_id, approved, _ = answer
+        if answered_id != confirmation_id:
+            raise _fail("The confirmation answer belongs to a different changeset; nothing was written.")
+        if not approved:
+            return {"status": "declined", "confirmation_id": confirmation_id,
+                    "note": "The user declined in the confirmation form. Nothing was written; the changeset "
+                            "stays pending."}
+        return {**await apply_changeset(lf, confirmation_id, expected_count), "confirmed_by": "user"}
+    if inline_confirm_enabled() and server._supports_form_elicitation(ctx):
+        record = await _load(lf["portal_id"], confirmation_id)
+        if record.get("status") == "pending" and expected_count == record.get("change_count"):
+            return _confirmation_form(record, confirmation_id)
+        # Anything else (already applied, a count mismatch, ...) goes on to apply_changeset, which returns the
+        # earlier result or the refusal; none of those writes.
+    confirmed_by = "assistant" if inline_confirm_enabled() else "assistant (confirmation form off on this server)"
+    return {**await apply_changeset(lf, confirmation_id, expected_count), "confirmed_by": confirmed_by}
 
 
 async def pronova_undo_changes(
@@ -1204,7 +1268,8 @@ TOOLS: list[tuple[str, object, str]] = common.guard_tools(
             "pronova_apply_changes",
             pronova_apply_changes,
             "Write a previewed changeset to HubSpot after the user has confirmed it. Pass the preview's "
-            "confirmation_id and its change_count as expected_count; a mismatch is refused. Records that "
+            "confirmation_id and its change_count as expected_count; a mismatch is refused. When the client "
+            "can show a confirmation form, the server asks the user directly and writes only on their yes. Records that "
             "changed since the preview are skipped and reported as drifted. Returns the status, counts "
             "of succeeded, failed and drifted changes, and the problems. Applying twice returns the first result.",
         ),
