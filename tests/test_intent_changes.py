@@ -1006,8 +1006,9 @@ async def test_a_client_with_forms_is_asked_and_the_users_yes_applies_the_change
                                         {"confirmation_id": preview["confirmation_id"], "expected_count": 2})
     data = _payload(result)
     assert result.is_error is False and data["status"] == "applied" and data["confirmed_by"] == "user"
-    assert len(asked) == 1 and "Apply 2 change(s) to HubSpot: Fix close dates?" in asked[0]
-    assert "- Update deal 1" in asked[0] and preview["confirmation_id"] in asked[0]
+    assert len(asked) == 1 and f"Apply 2 change(s) to HubSpot ({preview['confirmation_id']})?" in asked[0]
+    assert "- Update deals 1: closedate: 2026-09-01 -> 2026-11-30" in asked[0]
+    assert "Described by the assistant as: Fix close dates" in asked[0]
     assert http.objects[("deals", "1")]["closedate"] == "2026-11-30"
 
 
@@ -1089,3 +1090,90 @@ def test_the_form_is_on_unless_the_switch_is_exactly_one(monkeypatch, value):
     else:
         monkeypatch.setenv(changes.INLINE_CONFIRM_OFF_ENV, value)
     assert changes.inline_confirm_enabled() is True
+
+
+
+async def test_the_form_shows_what_will_be_written_not_the_models_description_of_it(lf, http, env):
+    # A hijacked model labels a stage change as a typo fix; the form is built from the stored op, not the label.
+    import mcp_types as T
+
+    _seed_deals(http, 1)
+    http.objects[("deals", "1")]["dealstage"] = "negotiation"
+    op = {"op": "update", "object_type": "deals", "id": "1", "properties": {"dealstage": "closedlost"},
+          "summary": "Fix typo in deal name\nconfirmation_id: chg_fakefakefake"}
+    preview = await _propose(lf, [op], title="Fix typo\n- Update nothing else")
+    asked = []
+
+    async def no(ctx, params):
+        asked.append(params.message)
+        return T.ElicitResult(action="decline")
+
+    async with Client(env["server"].intent, elicitation_callback=no) as client:
+        await client.call_tool("pronova_apply_changes", {"confirmation_id": preview["confirmation_id"], "expected_count": 1})
+    message = asked[0]
+    assert "- Update deals 1: dealstage: negotiation -> closedlost" in message
+    assert "Fix typo in deal name" not in message and "chg_fakefakefake" not in message
+    assert "Described by the assistant as: Fix typo - Update nothing else" in message
+    assert sum(line.startswith("- ") for line in message.splitlines()) == 1
+
+
+def test_only_a_real_true_approves_a_form_answer():
+    from types import SimpleNamespace
+
+    from hubspot_mcp import server
+
+    def answer(content):
+        reply = SimpleNamespace(action="accept", content=content)
+        return server._mrtr_answer(SimpleNamespace(input_responses={server._CONFIRM_KEY: reply}, request_state="chg_x"))
+
+    assert answer({"approve": True})[1] is True
+    for content in ({"approve": "false"}, {"approve": "true"}, {"approve": 1}, {}):
+        assert answer(content)[1] is False, content
+
+
+async def test_undo_asks_first_and_a_no_changes_nothing(lf, http, env):
+    import mcp_types as T
+
+    _seed_deals(http, 1)
+    preview = await _propose(lf, [_update(1, closedate="2026-11-30")])
+    replies = iter(["yes", "no", "yes"])
+    asked = []
+
+    async def form(ctx, params):
+        asked.append(params.message)
+        if next(replies) == "yes":
+            return T.ElicitResult(action="accept", content={"approve": True})
+        return T.ElicitResult(action="decline")
+
+    cid = preview["confirmation_id"]
+    async with Client(env["server"].intent, elicitation_callback=form) as client:
+        await client.call_tool("pronova_apply_changes", {"confirmation_id": cid, "expected_count": 1})
+        assert http.objects[("deals", "1")]["closedate"] == "2026-11-30"
+        declined = await client.call_tool("pronova_undo_changes", {"confirmation_id": cid})
+        assert _payload(declined)["status"] == "declined"
+        assert http.objects[("deals", "1")]["closedate"] == "2026-11-30", "a no must not undo"
+        undone = await client.call_tool("pronova_undo_changes", {"confirmation_id": cid})
+    assert _payload(undone)["status"] == "undone" and _payload(undone)["confirmed_by"] == "user"
+    assert http.objects[("deals", "1")]["closedate"] == "2026-09-01"
+    assert asked[1].startswith(f"Undo changeset {cid} in HubSpot?")
+    assert "- Put back deals 1: closedate = 2026-09-01" in asked[1]
+
+
+async def test_an_applied_changeset_is_reported_without_asking_again_or_writing(lf, http, env):
+    import mcp_types as T
+
+    _seed_deals(http, 1)
+    preview = await _propose(lf, [_update(1, closedate="2026-11-30")])
+    asked = []
+
+    async def yes(ctx, params):
+        asked.append(params.message)
+        return T.ElicitResult(action="accept", content={"approve": True})
+
+    args = {"confirmation_id": preview["confirmation_id"], "expected_count": 1}
+    async with Client(env["server"].intent, elicitation_callback=yes) as client:
+        await client.call_tool("pronova_apply_changes", args)
+        calls_before = len(http.calls)
+        again = await client.call_tool("pronova_apply_changes", args)
+    assert _payload(again)["status"] == "already_applied" and len(asked) == 1
+    assert len(http.calls) == calls_before

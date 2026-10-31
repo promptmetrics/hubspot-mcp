@@ -200,7 +200,7 @@ every call): `intent/grouped.py` passes `force_preview=True` through `server._ru
 only after `write_actions(action="approve")`. CONFIRM and FULL_GATE writes, `/mcp` and `/mcp/intent` are unchanged.
 Tested in `tests/test_intent_grouped.py`.
 
-Arm C's confirmation form: outside the benchmark, `pronova_apply_changes` asks the user in a confirmation form whenever the client can show one, and applies only on the user's yes; the result's `confirmed_by` says `user`. Headless Claude Code declares forms but declines every one, so the benchmark server runs with `HUBSPOT_MCP_INTENT_NO_INLINE_CONFIRM=1` (off by default, only the exact value `1` counts): the model's call is the confirmation, as for arms A and B, and `confirmed_by` says so. `pronova_get_sales_rules` reports `inline_confirm`, and pre-flight aborts unless it is false.
+Arm C's confirmation form: outside the benchmark, `pronova_apply_changes` and `pronova_undo_changes` ask the user in a confirmation form whenever the client can show one, and write only on the user's yes; the result's `confirmed_by` says `user`. The server builds the form from the stored changes (record, field, old and new value), not from the model's description of them. A client that declares no form support (or a request without capability metadata) gets no form, and `confirmed_by` says `assistant`. Headless Claude Code declares forms but declines every one, so the benchmark server runs with `HUBSPOT_MCP_INTENT_NO_INLINE_CONFIRM=1` (off by default, only the exact value `1` counts): the model's call is the confirmation, as for arms A and B, and `confirmed_by` says so. `pronova_get_sales_rules` reports `inline_confirm`, and pre-flight aborts unless it is false.
 
 ### Grading (`bench/grade.py`)
 

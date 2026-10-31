@@ -759,6 +759,30 @@ def _next_note(summary: dict[str, Any]) -> str:
     return " ".join(parts) + (" " if parts else "")
 
 
+def _apply_precheck(record: dict[str, Any], confirmation_id: str, expected_count: int) -> dict[str, Any] | None:
+    """The read-only checks before an apply: the earlier result for an applied changeset, a refusal for any
+    other state or a count mismatch, and None when the changeset is pending with the expected count."""
+    status = record.get("status")
+    if status == "applied":
+        return {"status": "already_applied", **record["summary"],
+                "note": "This changeset was already applied; nothing was written again."}
+    if status == "undone":
+        raise _fail(f"{confirmation_id} was applied and then undone. Build the changes again to redo them.")
+    if status == "applying":
+        raise _fail(
+            f"{confirmation_id} was being applied and an earlier apply stopped partway. Do not retry it: "
+            "check HubSpot for what landed, or call pronova_undo_changes to revert what was recorded."
+        )
+    if status != "pending":
+        raise _fail(f"{confirmation_id} is {status}; only a pending changeset can be applied.")
+    if expected_count != record["change_count"]:
+        raise _fail(
+            f"expected_count {expected_count} does not match the {record['change_count']} changes in "
+            f"{confirmation_id}. Show the user the preview again and pass its change_count."
+        )
+    return None
+
+
 async def apply_changeset(lf: dict[str, Any], confirmation_id: str, expected_count: int) -> dict[str, Any]:
     """Apply a stored changeset once. Reports partial failure instead of raising it."""
     portal_id = lf["portal_id"]
@@ -773,22 +797,8 @@ async def apply_changeset(lf: dict[str, Any], confirmation_id: str, expected_cou
     _inflight.add(confirmation_id)
     try:
         record = await _load(portal_id, confirmation_id)
-        status = record.get("status")
-        if status == "applied":
-            return {"status": "already_applied", **record["summary"],
-                    "note": "This changeset was already applied; nothing was written again."}
-        if status == "undone":
-            raise _fail(f"{confirmation_id} was applied and then undone. Build the changes again to redo them.")
-        if status == "applying":
-            raise _fail(
-                f"{confirmation_id} was being applied and an earlier apply stopped partway. Do not retry it: "
-                "check HubSpot for what landed, or call pronova_undo_changes to revert what was recorded."
-            )
-        if expected_count != record["change_count"]:
-            raise _fail(
-                f"expected_count {expected_count} does not match the {record['change_count']} changes in "
-                f"{confirmation_id}. Show the user the preview again and pass its change_count."
-            )
+        if (earlier := _apply_precheck(record, confirmation_id, expected_count)) is not None:
+            return earlier
         try:
             rules = load_rules(portal_id)
         except RulesError as exc:
@@ -1187,32 +1197,76 @@ def inline_confirm_enabled() -> bool:
     return os.environ.get(INLINE_CONFIRM_OFF_ENV) != "1"
 
 
-def _confirmation_form(record: dict[str, Any], confirmation_id: str) -> T.InputRequiredResult:
+def _clip(value: Any, limit: int = 60) -> str:
+    """One line, at most ``limit`` characters: a value the user reads in a form cannot add lines of its own."""
+    text = " ".join(str("empty" if value in (None, "") else value).split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _apply_lines(record: dict[str, Any]) -> list[str]:
+    """What the changeset will write, from the stored ops and the captured old values, never from the model's own
+    title or summaries: a hijacked model could describe a stage change as a typo fix."""
+    originals = record.get("original_values") or {}
+    lines = []
+    for op in record.get("ops") or []:
+        if op["op"] == "update":
+            old = originals.get(_key(op["object_type"], op["id"]), {})
+            changes = "; ".join(f"{k}: {_clip(old.get(k), 40)} -> {_clip(v, 40)}" for k, v in op["properties"].items())
+            lines.append(f"- Update {op['object_type']} {op['id']}: {changes}")
+        elif op["op"] == "create":
+            props = ", ".join(f"{k}={_clip(v, 40)}" for k, v in op["properties"].items())
+            links = ", ".join(_label(a["to"]) for a in op.get("associations") or [])
+            lines.append(f"- Create {op['object_type']}: {props}" + (f" | linked to {links}" if links else ""))
+        else:
+            lines.append(f"- Link {_label(op['from'])} with {_label(op['to'])}")
+    return lines
+
+
+def _undo_lines(snapshot: dict[str, Any]) -> list[str]:
+    meta = snapshot.get("metadata") or {}
+    lines = []
+    for key, props in (snapshot.get("original_values") or {}).items():
+        lines.append(f"- Put back {key.replace(':', ' ')}: " + "; ".join(f"{k} = {_clip(v, 40)}" for k, v in props.items()))
+    for item in meta.get("created") or []:
+        lines.append(f"- Archive the {item['object_type']} record {item['id']} that the changeset created")
+    if meta.get("associated"):
+        lines.append(f"- Remove {len(meta['associated'])} link(s) the changeset added")
+    return lines
+
+
+def _form(question: str, lines: list[str], described_as: str | None, request_state: str, label: str) -> T.InputRequiredResult:
     from hubspot_mcp import server
 
-    ops = record.get("ops") or []
-    lines = [f"Apply {record['change_count']} change(s) to HubSpot: {record['title']}?"]
-    lines += [f"- {op.get('summary')}" for op in ops[:FORM_CHANGE_LINES]]
-    if len(ops) > FORM_CHANGE_LINES:
-        lines.append(f"... and {len(ops) - FORM_CHANGE_LINES} more")
-    lines.append(f"confirmation_id: {confirmation_id}. pronova_undo_changes can revert it afterwards.")
+    shown = lines[:FORM_CHANGE_LINES] + ([f"... and {len(lines) - FORM_CHANGE_LINES} more"]
+                                         if len(lines) > FORM_CHANGE_LINES else [])
+    message = [question, *shown]
+    if described_as:
+        message.append(f"Described by the assistant as: {_clip(described_as, 120)}")
     return T.InputRequiredResult(
         input_requests={
             server._CONFIRM_KEY: T.ElicitRequest(
                 method="elicitation/create",
                 params=T.ElicitRequestFormParams(
                     mode="form",
-                    message="\n".join(lines),
+                    message="\n".join(message),
                     requested_schema={
                         "type": "object",
-                        "properties": {"approve": {"type": "boolean", "description": "Apply these changes."}},
+                        "properties": {"approve": {"type": "boolean", "description": label}},
                         "required": ["approve"],
                     },
                 ),
             )
         },
-        request_state=confirmation_id,
+        request_state=request_state,
     )
+
+
+def _confirmation_form(record: dict[str, Any], confirmation_id: str) -> T.InputRequiredResult:
+    return _form(f"Apply {record['change_count']} change(s) to HubSpot ({confirmation_id})?", _apply_lines(record),
+                 record.get("title"), confirmation_id, "Apply these changes.")
+
+
+UNDO_STATE_PREFIX = "undo:"
 
 
 async def pronova_apply_changes(
@@ -1239,10 +1293,10 @@ async def pronova_apply_changes(
         return {**await apply_changeset(lf, confirmation_id, expected_count), "confirmed_by": "user"}
     if inline_confirm_enabled() and server._supports_form_elicitation(ctx):
         record = await _load(lf["portal_id"], confirmation_id)
-        if record.get("status") == "pending" and expected_count == record.get("change_count"):
-            return _confirmation_form(record, confirmation_id)
-        # Anything else (already applied, a count mismatch, ...) goes on to apply_changeset, which returns the
-        # earlier result or the refusal; none of those writes.
+        # Without the user's answer this path only reads: the earlier result, a refusal, or the form.
+        if (earlier := _apply_precheck(record, confirmation_id, expected_count)) is not None:
+            return earlier
+        return _confirmation_form(record, confirmation_id)
     confirmed_by = "assistant" if inline_confirm_enabled() else "assistant (confirmation form off on this server)"
     return {**await apply_changeset(lf, confirmation_id, expected_count), "confirmed_by": confirmed_by}
 
@@ -1250,9 +1304,32 @@ async def pronova_apply_changes(
 async def pronova_undo_changes(
     ctx: Context,
     confirmation_id: Annotated[str, Field(description="The confirmation_id of an applied changeset.")],
-) -> dict[str, Any]:
+) -> dict[str, Any] | T.InputRequiredResult:
+    """Undo reverts values and archives records, so it gets the same gate as apply: a client that shows forms is
+    asked through one built from the undo snapshot, keyed ``undo:<id>`` so an apply answer cannot undo."""
+    from hubspot_mcp import server
+
     lf = await common.session(ctx)
-    return await undo_changeset(lf, confirmation_id)
+    answer = server._mrtr_answer(ctx)
+    if answer is not None:
+        answered_id, approved, _ = answer
+        if answered_id != UNDO_STATE_PREFIX + confirmation_id:
+            raise _fail("The confirmation answer is not for undoing this changeset; nothing was changed.")
+        if not approved:
+            return {"status": "declined", "confirmation_id": confirmation_id,
+                    "note": "The user declined in the confirmation form. Nothing was changed."}
+        return {**await undo_changeset(lf, confirmation_id), "confirmed_by": "user"}
+    if inline_confirm_enabled() and server._supports_form_elicitation(ctx) and _ID_RE.fullmatch(confirmation_id or ""):
+        store = get_store()
+        record = await store.load_pending(lf["portal_id"], confirmation_id)
+        snap = await store.load_undo_snapshot(lf["portal_id"], confirmation_id)
+        if (record is None or record.get("status") in ("applied", "applying")) and snap is not None \
+                and (snap.get("metadata") or {}).get("kind") == KIND:
+            return _form(f"Undo changeset {confirmation_id} in HubSpot?", _undo_lines(snap),
+                         (record or {}).get("title"), UNDO_STATE_PREFIX + confirmation_id, "Undo these changes.")
+        # Not undoable (already undone, never applied, snapshot gone): undo_changeset reports it and changes nothing.
+    confirmed_by = "assistant" if inline_confirm_enabled() else "assistant (confirmation form off on this server)"
+    return {**await undo_changeset(lf, confirmation_id), "confirmed_by": confirmed_by}
 
 
 async def pronova_list_pending_changes(

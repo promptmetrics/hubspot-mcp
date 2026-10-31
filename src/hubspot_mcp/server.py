@@ -604,7 +604,8 @@ def _mrtr_answer(ctx: Context) -> tuple[str, bool, int | None] | None:
     if getattr(answer, "action", None) != "accept":
         return (action_id, False, None)
     content = getattr(answer, "content", None) or {}
-    return (action_id, bool(content.get("approve")), content.get("confirm_count"))
+    # Only a real true approves: a client that skips schema validation could send the string "false".
+    return (action_id, content.get("approve") is True, content.get("confirm_count"))
 
 
 def _trace_tool_call(portal_id: str | None, name: str, mode: str, ok: bool, started: float) -> None:
