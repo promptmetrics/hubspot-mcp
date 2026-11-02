@@ -1,0 +1,59 @@
+# Sales rules the intent tools apply. Edit this file, or drop a per-portal copy
+# next to it as <portal_id>.yaml (or in $HUBSPOT_MCP_RULES_DIR). The file is
+# re-read on every tool call, so an edit takes effect on the next call with no
+# restart. A portal file replaces this one; it does not merge with it.
+#
+# Definitions (SILENT, OVERDUE, NO_NEXT, STALLED, INFLATED, SANDBAG) follow
+# hubspot-forecast/shared/rules.md. `pronova_get_sales_rules` and
+# `python -m hubspot_mcp.intent.rules` render these values as plain English.
+
+# Reference date for every "days since" and "past due" test. Leave null to use
+# today in `timezone`; set an ISO date (2026-10-30) to freeze a benchmark run.
+as_of: null
+timezone: Europe/Berlin
+
+# Owner email or id. "My deals" means this owner. Null means no default owner.
+default_owner: null
+
+# Currency every figure is reported in, when HubSpot supplies no home amount.
+# Null: a deal with no deal currency is counted at its own amount.
+home_currency: null
+
+# SILENT: no completed contact for more than this many days.
+silent_days: 14
+
+# STALLED: in the current stage for more than this many days. `by_stage` keys
+# are stage labels (case-insensitive) and override `default` for that stage.
+stalled_days:
+  default: 30
+  by_stage: {}
+
+# Forecast window used when a tool asks "what is at risk soon".
+at_risk_window_days: 14
+
+# INFLATED: Commit deal whose stage probability is below this.
+inflated_below: 0.4
+# SANDBAG: Pipeline deal whose stage probability is above this.
+sandbag_above: 0.8
+
+# Stage label -> probability (0 to 1). Empty means use HubSpot's stage metadata.
+stage_probabilities: {}
+
+# Reason codes pronova_triage_pipeline reports, and how heavily each one counts
+# in the urgency score (weight x amount in home currency).
+triage_codes: [OVERDUE, NO_NEXT, SILENT, STALLED]
+triage_weights:
+  OVERDUE: 4
+  SILENT: 3
+  NO_NEXT: 2
+  STALLED: 1
+
+# Forecast categories the SILENT and NO_NEXT rules apply to.
+silent_scope: [COMMIT, BEST_CASE]
+no_next_scope: [COMMIT, BEST_CASE]
+
+# Month (1-12) the fiscal year starts in. 1 means fiscal quarters equal calendar quarters.
+fiscal_year_start_month: 1
+
+# Records per HubSpot batch write. HubSpot allows 100 at most.
+bulk_write_batch_size: 100

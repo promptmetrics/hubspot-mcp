@@ -37,7 +37,7 @@ import sys
 import time
 import typing
 from collections.abc import Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
 import mcp_types as T
@@ -56,6 +56,12 @@ from hubspot_mcp.handlers import (
     handle_approve,
     handle_reject,
     handle_tool,
+)
+from hubspot_mcp.intent import (
+    GROUPED_INSTRUCTIONS,
+    INTENT_INSTRUCTIONS,
+    register_grouped_tools,
+    register_intent_tools,
 )
 from hubspot_mcp.routed import ROUTED_INSTRUCTIONS, register_routed_tools
 from hubspot_mcp.tools import ToolDef, list_tools
@@ -200,6 +206,10 @@ MCP_PATH = "/mcp"
 # other by accident.
 ROUTED_PATH = "/mcp/routed"
 _ROUTED_WELL_KNOWN = "/.well-known/oauth-protected-resource" + ROUTED_PATH
+# The intent surface (pronova_* job tools) and its benchmark control, the grouped
+# surface. Each gets its own resource identifier for the same reason as routed.
+INTENT_PATH = "/mcp/intent"
+GROUPED_PATH = "/mcp/grouped"
 
 
 def _hosted_auth(mcp_path: str = MCP_PATH) -> tuple[Any, Any]:
@@ -239,6 +249,8 @@ def _hosted_auth(mcp_path: str = MCP_PATH) -> tuple[Any, Any]:
 
 _AUTH_SETTINGS, _TOKEN_VERIFIER = _hosted_auth()
 _ROUTED_AUTH_SETTINGS, _ROUTED_TOKEN_VERIFIER = _hosted_auth(ROUTED_PATH)
+_INTENT_AUTH_SETTINGS, _INTENT_TOKEN_VERIFIER = _hosted_auth(INTENT_PATH)
+_GROUPED_AUTH_SETTINGS, _GROUPED_TOKEN_VERIFIER = _hosted_auth(GROUPED_PATH)
 
 # The full surface had no instructions before skills arrived; every tool was
 # self-describing. Skills are workflows the model should look up before it
@@ -299,6 +311,33 @@ routed = MCPServer(
     },
 )
 
+# The intent and grouped surfaces share the routed lifespan: it already reuses
+# the full server's portal context and stays inert when hosted.
+intent = MCPServer(
+    "hubspot-mcp-intent",
+    version=__version__,
+    instructions=INTENT_INSTRUCTIONS,
+    lifespan=routed_lifespan,
+    auth=_INTENT_AUTH_SETTINGS,
+    token_verifier=_INTENT_TOKEN_VERIFIER,
+    cache_hints={
+        "tools/list": CacheHint(ttl_ms=300_000, scope="private"),
+        "server/discover": CacheHint(ttl_ms=300_000, scope="private"),
+    },
+)
+
+grouped = MCPServer(
+    "hubspot-mcp-grouped",
+    version=__version__,
+    instructions=GROUPED_INSTRUCTIONS,
+    lifespan=routed_lifespan,
+    auth=_GROUPED_AUTH_SETTINGS,
+    token_verifier=_GROUPED_TOKEN_VERIFIER,
+    cache_hints={
+        "tools/list": CacheHint(ttl_ms=300_000, scope="private"),
+        "server/discover": CacheHint(ttl_ms=300_000, scope="private"),
+    },
+)
 
 
 async def _probe_capabilities(portal_config: PortalConfig):
@@ -565,7 +604,8 @@ def _mrtr_answer(ctx: Context) -> tuple[str, bool, int | None] | None:
     if getattr(answer, "action", None) != "accept":
         return (action_id, False, None)
     content = getattr(answer, "content", None) or {}
-    return (action_id, bool(content.get("approve")), content.get("confirm_count"))
+    # Only a real true approves: a client that skips schema validation could send the string "false".
+    return (action_id, content.get("approve") is True, content.get("confirm_count"))
 
 
 def _trace_tool_call(portal_id: str | None, name: str, mode: str, ok: bool, started: float) -> None:
@@ -581,7 +621,7 @@ def _trace_tool_call(portal_id: str | None, name: str, mode: str, ok: bool, star
 
 
 async def _run_domain_tool(
-    ctx: Context, name: str, kwargs: dict[str, Any], *, mode: str = "full"
+    ctx: Context, name: str, kwargs: dict[str, Any], *, mode: str = "full", force_preview: bool = False
 ) -> Any:
     """Run one domain tool the way its registered MCP wrapper does.
 
@@ -590,12 +630,14 @@ async def _run_domain_tool(
     MRTR resume, the write gate in ``handle_tool`` and the inline confirmation
     request behave identically whichever surface the model called. ``mode``
     only labels the trace event, so a run can be split by surface afterwards.
+    ``force_preview`` turns an AUTO-tier write into a CONFIRM-tier preview; only
+    the grouped surface sets it, and only under its benchmark env switch.
     """
     started = time.perf_counter()
     lf = await _session(ctx)
     ok = False
     try:
-        result = await _run_domain_tool_for(ctx, lf, name, kwargs)
+        result = await _run_domain_tool_for(ctx, lf, name, kwargs, force_preview=force_preview)
         ok = True
         return result
     finally:
@@ -603,7 +645,7 @@ async def _run_domain_tool(
 
 
 async def _run_domain_tool_for(
-    ctx: Context, lf: dict[str, Any], name: str, kwargs: dict[str, Any]
+    ctx: Context, lf: dict[str, Any], name: str, kwargs: dict[str, Any], *, force_preview: bool = False
 ) -> Any:
     if lf.get("auth_error"):
         if (guidance := _not_connected_result(lf)) is not None:
@@ -648,7 +690,10 @@ async def _run_domain_tool_for(
 
     try:
         result = await handle_tool(
-            lf["client"], lf["cache"], lf["portal_config"], {"tool_name": name, "input": kwargs}
+            lf["client"],
+            lf["cache"],
+            lf["portal_config"],
+            {"tool_name": name, "input": kwargs, **({"force_preview": True} if force_preview else {})},
         )
     except HandlerError as exc:
         raise ToolError(exc.error["message"]) from exc
@@ -661,11 +706,16 @@ async def _run_domain_tool_for(
 
     # A write that needs a human decision asks for it inline, when the
     # client can answer. AUTO-tier writes already applied and never reach
-    # here with status "preview".
+    # here with status "preview". Under force_preview (the grouped bench
+    # control) the plain preview goes back instead: headless Claude Code
+    # declares form elicitation but declines every form, so the inline ask
+    # would reject each write, while the intent surface it is compared with
+    # hands the model a confirmation id to approve.
     if (
         isinstance(data, dict)
         and data.get("status") == "preview"
         and data.get("action_id")
+        and not force_preview
         and _supports_form_elicitation(ctx)
     ):
         return _confirmation_request(data)
@@ -756,7 +806,9 @@ async def hubspot_list_pending_writes(ctx: Context) -> Any:
     lf = await _safety_ctx(ctx)
     from hubspot_mcp.state import get_store
 
-    return {"pending": await get_store().list_pending(lf["portal_id"])}
+    # Intent changesets (``chg_`` ids) are listed by pronova_list_pending_changes.
+    pending = await get_store().list_pending(lf["portal_id"])
+    return {"pending": [a for a in pending if not a.startswith("chg_")]}
 
 
 async def hubspot_list_recent_audit(ctx: Context, limit: int = 20) -> Any:
@@ -1065,6 +1117,8 @@ def _register_all_tools() -> None:
 _register_all_tools()
 _register_agent_prompts()
 register_routed_tools(routed)
+register_intent_tools(intent)
+register_grouped_tools(grouped)
 
 
 @mcp.custom_route("/connect/hubspot", methods=["GET"])
@@ -1214,18 +1268,22 @@ class _SplitSurfaces:
     the ASGI server runs.
     """
 
-    def __init__(self, full: Any, routed_app: Any) -> None:
+    def __init__(self, full: Any, routed_app: Any, extra: dict[str, Any] | None = None) -> None:
         self._full = full
         self._routed = routed_app
+        # Further surfaces by mount path (intent, grouped), dispatched like routed.
+        self._surfaces: dict[str, Any] = {ROUTED_PATH: routed_app, **(extra or {})}
 
     @property
     def routes(self) -> list[Any]:
-        """Both apps' routes, for anyone inspecting the served surface."""
-        return [*self._full.routes, *self._routed.routes]
+        """Every app's routes, for anyone inspecting the served surface."""
+        return [*self._full.routes, *(r for app in self._surfaces.values() for r in app.routes)]
 
     def _pick(self, path: str) -> Any:
-        if path == ROUTED_PATH or path.startswith(ROUTED_PATH + "/") or path.startswith(_ROUTED_WELL_KNOWN):
-            return self._routed
+        for mount, app in self._surfaces.items():
+            well_known = "/.well-known/oauth-protected-resource" + mount
+            if path == mount or path.startswith(mount + "/") or path.startswith(well_known):
+                return app
         return self._full
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
@@ -1240,10 +1298,10 @@ class _SplitSurfaces:
             return
         started = False
         try:
-            async with (
-                self._full.router.lifespan_context(self._full),
-                self._routed.router.lifespan_context(self._routed),
-            ):
+            async with AsyncExitStack() as stack:
+                # The full app first: the other surfaces' lifespans reuse its context.
+                for app in (self._full, *self._surfaces.values()):
+                    await stack.enter_async_context(app.router.lifespan_context(app))
                 started = True
                 await send({"type": "lifespan.startup.complete"})
                 await receive()  # lifespan.shutdown
@@ -1286,7 +1344,14 @@ def build_http_app(host: str = "127.0.0.1") -> Any:
 
     full_app = mcp.streamable_http_app(streamable_http_path=MCP_PATH, host=host)
     routed_app = routed.streamable_http_app(streamable_http_path=ROUTED_PATH, host=host)
-    app = _SplitSurfaces(full_app, routed_app)
+    app = _SplitSurfaces(
+        full_app,
+        routed_app,
+        {
+            INTENT_PATH: intent.streamable_http_app(streamable_http_path=INTENT_PATH, host=host),
+            GROUPED_PATH: grouped.streamable_http_app(streamable_http_path=GROUPED_PATH, host=host),
+        },
+    )
 
     if _TOKEN_VERIFIER is not None:
         # Per-request OAuth replaces the shared secret rather than stacking with
@@ -1302,13 +1367,28 @@ def build_http_app(host: str = "127.0.0.1") -> Any:
     return BearerAuthMiddleware(app, secret=secret)
 
 
-def run(transport: str = "stdio", *, host: str | None = None, port: int | None = None) -> None:
+SURFACES = ("full", "routed", "intent", "grouped")
+
+
+def run(
+    transport: str = "stdio",
+    *,
+    host: str | None = None,
+    port: int | None = None,
+    surface: str = "full",
+) -> None:
     """Run the MCP server over ``stdio`` (default) or Streamable HTTP.
 
     ``"http"`` is accepted as an alias for the spec's ``"streamable-http"``.
     The legacy HTTP+SSE transport is deprecated as of 2026-07-28 and is not
     offered here.
+
+    ``surface`` picks which tool set a stdio process serves: one process has
+    one stdin, so it can serve only one. HTTP serves every surface at its own
+    path and ignores it.
     """
+    if surface not in SURFACES:
+        raise ValueError(f"Unknown surface {surface!r}. Choose one of: {', '.join(SURFACES)}.")
     if transport in ("http", "streamable-http"):
         import uvicorn
 
@@ -1322,4 +1402,4 @@ def run(transport: str = "stdio", *, host: str | None = None, port: int | None =
             log_level=mcp.settings.log_level.lower(),
         )
     else:
-        mcp.run(transport="stdio")
+        {"full": mcp, "routed": routed, "intent": intent, "grouped": grouped}[surface].run(transport="stdio")

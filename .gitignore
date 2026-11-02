@@ -38,3 +38,9 @@ hubspot.config.yml
 
 # Benchmark session transcripts: local, may contain real portal data
 bench/runs/
+
+# Tool-event log written by a session hook; binary, holds session content
+.claude/self-improve/
+
+# Resolved by uv for local runs; CI installs from pyproject.toml and does not read it
+uv.lock
