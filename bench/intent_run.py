@@ -838,6 +838,19 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def skills_sha256(src: Path | None) -> str | None:
+    """sha256 over the skill folders ``prepare_cwd`` copies (relative path and bytes of every file), so a run records
+    which skill text it ran on. None when there is no skills folder."""
+    if src is None or not src.is_dir():
+        return None
+    digest = hashlib.sha256()
+    for skill in sorted(src.glob("*/SKILL.md")):
+        for path in sorted(p for p in skill.parent.rglob("*") if p.is_file()):
+            digest.update(path.relative_to(src).as_posix().encode("utf-8") + b"\0")
+            digest.update(hashlib.sha256(path.read_bytes()).digest())
+    return digest.hexdigest()
+
+
 def tool_version(cmd: list[str]) -> str:
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)  # noqa: S603
@@ -1030,8 +1043,14 @@ def select_cells(arms: str, models: str) -> list[tuple[str, str]]:
     return [c for c in CELLS if c[0] in wanted_arms and c[1] in wanted_models]
 
 
-def default_restore_cmd(portal: str) -> str:
-    return f"python3 demo/seed/restore.py --expect-portal {portal} --apply --yes"
+BENCH_SEED_LABEL = "enterprise"
+
+
+def default_restore_cmd(portal: str, as_of: str, token_env: str) -> str:
+    """Name the benchmark's own snapshot and token. Without --portal and --demo-day restore.py takes the newest snapshot
+    of any label, which after a demo ``kit.py prepare`` on this portal is another day's."""
+    return (f"python3 demo/seed/restore.py --portal {BENCH_SEED_LABEL} --demo-day {as_of} --expect-portal {portal} "
+            f"--token-env {token_env} --apply --yes")
 
 
 def print_plan(args: argparse.Namespace, tasks: list[dict[str, Any]], cells: list[tuple[str, str]], reps: int,
@@ -1148,7 +1167,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     (expected, skills_b, skills_cd, claude_version, hubspot_version, status_line, as_of, fingerprint, identity,
      d_force_observed) = setup
-    restore_cmd = args.restore_cmd or default_restore_cmd(args.portal)
+    restore_cmd = args.restore_cmd or default_restore_cmd(args.portal, as_of, args.token_env)
     meta = {
         "started": stamp, "argv": list(argv if argv is not None else sys.argv[1:]), "claude_version": claude_version,
         "hubspot_cli_version": hubspot_version, "expected_cli": EXPECTED_CLI, "official_server_status": status_line,
@@ -1159,6 +1178,7 @@ def main(argv: list[str] | None = None) -> int:
         "suffix_read": SUFFIX_READ, "suffix_write": SUFFIX_WRITE, "answer_prefix": ANSWER_PREFIX,
         "answers": {t["id"]: answer_instruction(t) for t in tasks}, "builtin_skills": sorted(BUILTIN_SKILLS),
         "arm_expected_skills": {a: sorted(s) for a, s in expected.items()},
+        "skills_cd_sha256": skills_sha256(skills_cd) if any(ARMS[a]["skills"] == "cd" for a, _ in cells) else None,
         "arm_d_tier": "auto" if args.arm_d_auto_tier else "preview",
         "arm_d_force_preview_observed": d_force_observed, "portal_identity": identity,
         "env_stripped": [*sorted(STRIP_ENV | {args.secret_env}), STRIP_PREFIX + "*"],

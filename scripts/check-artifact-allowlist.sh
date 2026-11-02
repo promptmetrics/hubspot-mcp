@@ -8,12 +8,12 @@
 # it by accident would ship someone else's repo inside this plugin's artifact,
 # so an unrecognised tracked file is a hard CI failure rather than a warning.
 #
-# Allowlist: src/ tests/ bin/ hooks/ skills/ .claude-plugin/ .github/
+# Allowlist: src/ tests/ bin/ hooks/ skills/ bench/ demo/ .claude-plugin/ .github/
 # scripts/check-artifact-allowlist.sh, the tracked files under docs/,
 # README.md, CHANGELOG.md, LICENSE, pyproject.toml, .gitignore
 set -u
 
-allow_regex='^(src/|tests/|bin/|hooks/|skills/|bench/|\.claude-plugin/|\.github/|scripts/check-artifact-allowlist\.sh$|docs/[A-Za-z0-9._-]+\.md$|README\.md$|api/index\.py$|hubspot-app/|vercel\.json$|\.vercelignore$|requirements\.txt$|CHANGELOG\.md$|LICENSE$|pyproject\.toml$|\.gitignore$)'
+allow_regex='^(src/|tests/|bin/|hooks/|skills/|bench/|demo/|\.claude-plugin/|\.github/|scripts/check-artifact-allowlist\.sh$|docs/[A-Za-z0-9._-]+\.md$|README\.md$|api/index\.py$|hubspot-app/|vercel\.json$|\.vercelignore$|requirements\.txt$|CHANGELOG\.md$|LICENSE$|pyproject\.toml$|\.gitignore$)'
 
 bad=$(git ls-files | grep -Ev "$allow_regex")
 if [ -n "$bad" ]; then

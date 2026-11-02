@@ -411,7 +411,7 @@ def grade_job3(end_state: Any, answer: Any, truth: dict) -> dict:
     task_ok = (
         len(tasks) == t_exp.get("count", 1)
         and all(m.casefold() in str(tasks[0].get("title") or "").casefold() for m in t_exp["title_mentions"])
-        and to_date(tasks[0].get("due"), tz) == to_date(t_exp["due"])
+        and to_date(tasks[0].get("due"), tz) in {to_date(d) for d in (t_exp.get("due_accepted") or [t_exp["due"]])}
         and str(tasks[0].get("status") or "").upper() == t_exp["status"]
         and _assoc_ok(tasks[0], t_exp["associated_with"], seed_to_deal)
     )

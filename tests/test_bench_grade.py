@@ -565,6 +565,19 @@ def test_job3_wrong_amount_and_task_due_hand_checked(truth):
     assert r["checks"]["deal_amount"] is False and r["checks"]["task"] is False and not r["exact"]
 
 
+def test_job3_task_due_accepts_either_friday_when_the_key_lists_both(truth):
+    es = perfect_end_state("job3", truth)
+    exp = truth["job3"]["expected_end_state"]["task"]
+    exp["due_accepted"] = ["2026-11-06", exp["due"]]
+    es["created"]["tasks"][0]["due"] = "2026-11-06T09:00:00Z"
+    assert grade.grade_job3(es, {}, truth)["checks"]["task"] is True
+    es["created"]["tasks"][0]["due"] = "2026-11-07T09:00:00Z"
+    assert grade.grade_job3(es, {}, truth)["checks"]["task"] is False
+    del exp["due_accepted"]
+    es["created"]["tasks"][0]["due"] = "2026-11-06T09:00:00Z"
+    assert grade.grade_job3(es, {}, truth)["checks"]["task"] is False
+
+
 def test_job3_stage_change_breaks_deal_unchanged(truth):
     es = perfect_end_state("job3", truth)
     es["deals_changed"]["Acme Corp renewal"]["changes"]["dealstage"] = {"from": "a", "to": "b"}

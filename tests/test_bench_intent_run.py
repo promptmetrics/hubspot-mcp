@@ -7,6 +7,7 @@ single upstream re-run. Placeholder data only.
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -415,6 +416,30 @@ def test_skill_names_come_from_frontmatter_with_the_directory_name_as_fallback(t
     assert ir.skill_names(tmp_path) == ["Named One", "dir-two"]
 
 
+def test_skills_sha256_follows_the_copied_skill_text_and_nothing_else(tmp_path):
+    assert ir.skills_sha256(None) is None and ir.skills_sha256(tmp_path / "absent") is None
+    (tmp_path / "one").mkdir()
+    (tmp_path / "one" / "SKILL.md").write_text("---\nname: one\n---\nbody", encoding="utf-8")
+    first = ir.skills_sha256(tmp_path)
+    assert first and len(first) == 64 and ir.skills_sha256(tmp_path) == first
+    (tmp_path / "README.md").write_text("not copied into a session", encoding="utf-8")
+    (tmp_path / "not-a-skill").mkdir()
+    (tmp_path / "not-a-skill" / "notes.md").write_text("no SKILL.md here", encoding="utf-8")
+    assert ir.skills_sha256(tmp_path) == first
+    (tmp_path / "one" / "SKILL.md").write_text("---\nname: one\n---\nbody changed", encoding="utf-8")
+    second = ir.skills_sha256(tmp_path)
+    assert second != first
+    (tmp_path / "one" / "extra.md").write_text("a file copied with the skill", encoding="utf-8")
+    assert ir.skills_sha256(tmp_path) not in (first, second)
+
+
+def test_the_hash_depends_on_the_folder_name_as_well_as_the_text(tmp_path):
+    for root, name in ((tmp_path / "a", "alpha"), (tmp_path / "b", "beta")):
+        (root / name).mkdir(parents=True)
+        (root / name / "SKILL.md").write_text("same text", encoding="utf-8")
+    assert ir.skills_sha256(tmp_path / "a") != ir.skills_sha256(tmp_path / "b")
+
+
 def test_a_hubspot_skill_visible_to_arm_c_fails_the_session_as_a_harness_error(ctx):
     claude = FakeClaude(ctx, lambda arm, t: events_for(arm, ctx, text=answer_text(t), skills_extra=["deal-management"]))
     rec = run(ctx, "job1", ("C", "sonnet"), claude)
@@ -654,6 +679,13 @@ def test_make_restore_fn_runs_the_command_in_its_directory_with_the_token_under_
     assert seen["cwd"] == "/work/forecast" and seen["timeout"] == 600 and seen["capture_output"] is True
     assert seen["env"]["HUBSPOT_PRIVATE_APP_TOKEN"] == "tok-test"
     assert result["exit_code"] == 0 and len(result["output_tail"]) == 2000 and result["output_tail"].endswith("tail")
+
+
+def test_default_restore_command_names_the_benchmark_snapshot_and_its_own_token():
+    cmd = ir.default_restore_cmd("149614891", "2026-11-10", "HUBSPOT_TOKEN_149614891")
+    assert shlex.split(cmd) == [
+        "python3", "demo/seed/restore.py", "--portal", "enterprise", "--demo-day", "2026-11-10", "--expect-portal",
+        "149614891", "--token-env", "HUBSPOT_TOKEN_149614891", "--apply", "--yes"]
 
 
 def test_restore_keeps_an_existing_private_app_token(monkeypatch):
@@ -1047,7 +1079,7 @@ def test_a_dry_run_writes_the_whole_run_directory_from_fakes_and_leaks_no_secret
     meta = json.loads((out / "meta.json").read_text())
     for key in ("claude_version", "hubspot_cli_version", "models", "arm_expected_skills", "builtin_skills", "suffix_read",
                 "suffix_write", "answer_prefix", "answers", "env_stripped", "arm_d_tier", "rules_hash", "as_of",
-                "truth_sha256", "jobs_sha256", "sales_rules_sha256", "restore_cmd", "timeout", "portal_identity",
+                "truth_sha256", "jobs_sha256", "sales_rules_sha256", "skills_cd_sha256", "restore_cmd", "timeout", "portal_identity",
                 "arm_d_force_preview_observed", "env_arm_b", "arm_b_fs_deny"):
         assert key in meta, key
     assert meta["models"] == {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"} and set(meta["answers"]) == set(JOB)
